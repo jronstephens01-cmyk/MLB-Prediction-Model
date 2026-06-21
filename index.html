@@ -81,6 +81,12 @@
   .stat-box .k{font-family:var(--mono); font-size:10px; color:var(--chalk-dim); text-transform:uppercase;}
   .stat-box .v{font-family:var(--mono); font-size:15px; font-weight:700; margin-top:2px;}
 
+  .dual-readout{display:flex; gap:10px; margin-top:6px;}
+  .team-prob-box{flex:1; background:var(--ink); border:1px solid var(--line-strong); border-radius:10px; padding:14px; text-align:center;}
+  .team-prob-box .tname{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); text-transform:uppercase; letter-spacing:1px;}
+  .team-prob-box .tprob{font-family:var(--mono); font-size:34px; font-weight:700; margin:6px 0 0;}
+  .type-chip{font-family:var(--mono); font-size:10px; padding:2px 6px; border-radius:4px; border:1px solid var(--line-strong); color:var(--chalk-dim); margin-right:6px; text-transform:uppercase;}
+
   .leaderboard-row{display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid var(--line); cursor:pointer;}
   .leaderboard-row:last-child{border-bottom:none;}
   .leaderboard-row:hover{background:rgba(244,241,234,0.04);}
@@ -133,9 +139,9 @@
 
 <nav class="tabs">
   <button class="tab-btn active" data-tab="hr">HR Props</button>
-  <button class="tab-btn soon" data-tab="ks" disabled>K's</button>
-  <button class="tab-btn soon" data-tab="outs" disabled>Pitching Outs</button>
-  <button class="tab-btn soon" data-tab="winners" disabled>Winners</button>
+  <button class="tab-btn" data-tab="ks">K's</button>
+  <button class="tab-btn" data-tab="outs">Pitching Outs</button>
+  <button class="tab-btn" data-tab="winners">Winners</button>
   <button class="tab-btn" data-tab="tracking">Tracking</button>
 </nav>
 
@@ -235,34 +241,155 @@
       </div>
       <button id="savePickBtn" style="width:100%; margin-top:12px;">Save to Pick Tracking</button>
     </div>
-
-    <details class="debug">
-      <summary>Debug log</summary>
-      <div id="debugLog"></div>
-    </details>
   </div>
 
-  <!-- ============ K's TAB (stub) ============ -->
+  <!-- ============ K's TAB ============ -->
   <div id="tab-ks" style="display:none;">
-    <div class="panel soon-panel">
-      <div class="big">K's — Coming Next</div>
-      <div style="margin-top:8px; font-size:13px;">Pitcher strikeout props. Building this once HR props is dialed in.</div>
+    <div class="panel">
+      <div class="panel-title">Auto Scan</div>
+      <div class="panel-desc">Ranks every probable starter on today's slate by projected strikeouts. Tap a row to load it into the calculator below with a real opposing-team K rate.</div>
+      <button class="primary" id="ksScanBtn" style="width:100%;">Scan Today's Slate</button>
+      <div class="progress-text" id="ksScanProgress"></div>
+      <div id="ksLeaderboard" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Strikeout Prop <small>fine-tune a single pick</small></div>
+      <div class="panel-desc">Projects total strikeouts for a starting pitcher using their K rate (season blended with last 5 starts) against the opposing lineup's season strikeout rate, scaled to projected batters faced.</div>
+
+      <div class="field-row"><label>Game</label><select id="ksGameSelect"><option value="">Loading games…</option></select></div>
+      <div class="field-row"><label>Pitcher</label><select id="ksPitcherSelect" disabled><option value="">—</option></select></div>
+
+      <div class="toggle-row">
+        <input type="checkbox" id="ksManualMode">
+        <label for="ksManualMode" style="margin:0; text-transform:none; font-family:var(--body); color:var(--chalk-dim);">Manual entry mode</label>
+      </div>
+      <div id="ksManualFields" style="display:none;">
+        <div class="two-col">
+          <div class="field-row"><label>Pitcher K% per BF (e.g. .25)</label><input type="number" step="0.01" id="ksManKpct" placeholder="0.25"></div>
+          <div class="field-row"><label>Opp Team K% (e.g. .23)</label><input type="number" step="0.01" id="ksManOppKpct" placeholder="0.23"></div>
+        </div>
+        <div class="field-row"><label>Projected Batters Faced</label><input type="number" id="ksManBF" value="21"></div>
+      </div>
+
+      <div class="field-row"><label>Strikeout Line</label><input type="number" step="0.5" id="ksLine" value="5.5"></div>
+      <button class="primary" id="ksCalcBtn" style="width:100%;">Calculate</button>
+    </div>
+
+    <div class="panel" id="ksResultPanel" style="display:none;">
+      <div class="panel-title">Readout</div>
+      <div class="readout">
+        <div class="readout-label">Projected Strikeouts</div>
+        <div class="readout-number" id="ksProjNumber">--</div>
+        <div class="readout-tag" id="ksTag">—</div>
+        <div class="stat-grid">
+          <div class="stat-box"><div class="k">Over Line</div><div class="v" id="ksOverPct">--</div></div>
+          <div class="stat-box"><div class="k">Under Line</div><div class="v" id="ksUnderPct">--</div></div>
+          <div class="stat-box"><div class="k">Pitcher K% (blended)</div><div class="v" id="ksPitRate">--</div></div>
+          <div class="stat-box"><div class="k">Opp Team K%</div><div class="v" id="ksOppRate">--</div></div>
+          <div class="stat-box"><div class="k">Proj. Batters Faced</div><div class="v" id="ksBF">--</div></div>
+          <div class="stat-box"><div class="k">Recent Form</div><div class="v" id="ksRecent">--</div></div>
+        </div>
+      </div>
+      <div class="two-col" style="margin-top:12px;">
+        <button id="ksSaveOverBtn">Save: Over</button>
+        <button id="ksSaveUnderBtn">Save: Under</button>
+      </div>
     </div>
   </div>
 
-  <!-- ============ OUTS TAB (stub) ============ -->
+  <!-- ============ PITCHING OUTS TAB ============ -->
   <div id="tab-outs" style="display:none;">
-    <div class="panel soon-panel">
-      <div class="big">Pitching Outs — Coming Soon</div>
-      <div style="margin-top:8px; font-size:13px;">Innings/outs recorded props, after K's.</div>
+    <div class="panel">
+      <div class="panel-title">Auto Scan</div>
+      <div class="panel-desc">Ranks every probable starter on today's slate by projected outs recorded, factoring opponent offense strength. Tap a row to load it into the calculator below.</div>
+      <button class="primary" id="outsScanBtn" style="width:100%;">Scan Today's Slate</button>
+      <div class="progress-text" id="outsScanProgress"></div>
+      <div id="outsLeaderboard" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Pitching Outs Prop <small>fine-tune a single pick</small></div>
+      <div class="panel-desc">Projects outs recorded using the starter's innings/start (season blended with last 5 starts), adjusted for the opposing lineup's offensive strength relative to league average.</div>
+
+      <div class="field-row"><label>Game</label><select id="outsGameSelect"><option value="">Loading games…</option></select></div>
+      <div class="field-row"><label>Pitcher</label><select id="outsPitcherSelect" disabled><option value="">—</option></select></div>
+
+      <div class="toggle-row">
+        <input type="checkbox" id="outsManualMode">
+        <label for="outsManualMode" style="margin:0; text-transform:none; font-family:var(--body); color:var(--chalk-dim);">Manual entry mode</label>
+      </div>
+      <div id="outsManualFields" style="display:none;">
+        <div class="two-col">
+          <div class="field-row"><label>Avg IP / Start</label><input type="number" step="0.1" id="outsManIP" placeholder="5.5"></div>
+          <div class="field-row"><label>Opp Runs/Game (e.g. 4.3)</label><input type="number" step="0.1" id="outsManOppRuns" placeholder="4.3"></div>
+        </div>
+      </div>
+
+      <div class="field-row"><label>Outs Line (3 outs = 1 inning)</label><input type="number" step="0.5" id="outsLine" value="15.5"></div>
+      <button class="primary" id="outsCalcBtn" style="width:100%;">Calculate</button>
+    </div>
+
+    <div class="panel" id="outsResultPanel" style="display:none;">
+      <div class="panel-title">Readout</div>
+      <div class="readout">
+        <div class="readout-label">Projected Outs Recorded</div>
+        <div class="readout-number" id="outsProjNumber">--</div>
+        <div class="readout-tag" id="outsTag">—</div>
+        <div class="stat-grid">
+          <div class="stat-box"><div class="k">Over line</div><div class="v" id="outsOverPct">--</div></div>
+          <div class="stat-box"><div class="k">Under line</div><div class="v" id="outsUnderPct">--</div></div>
+          <div class="stat-box"><div class="k">Avg IP / Start</div><div class="v" id="outsIPstat">--</div></div>
+          <div class="stat-box"><div class="k">Opp Offense Factor</div><div class="v" id="outsOppFactor">--</div></div>
+        </div>
+      </div>
+      <div class="two-col" style="margin-top:12px;">
+        <button id="outsSaveOverBtn">Save: Over</button>
+        <button id="outsSaveUnderBtn">Save: Under</button>
+      </div>
     </div>
   </div>
 
-  <!-- ============ WINNERS TAB (stub) ============ -->
+  <!-- ============ WINNERS TAB ============ -->
   <div id="tab-winners" style="display:none;">
-    <div class="panel soon-panel">
-      <div class="big">Game Winners — Coming Soon</div>
-      <div style="margin-top:8px; font-size:13px;">Moneyline / game prediction model, last on the roadmap.</div>
+    <div class="panel">
+      <div class="panel-title">Auto Scan</div>
+      <div class="panel-desc">Runs the win model across every game on today's slate at once, biggest favorites first. Tap a row to load it into the calculator below.</div>
+      <button class="primary" id="winScanBtn" style="width:100%;">Scan Today's Slate</button>
+      <div class="progress-text" id="winScanProgress"></div>
+      <div id="winLeaderboard" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Game Winner <small>fine-tune a single pick</small></div>
+      <div class="panel-desc">Win probability from season win% (log5 method), adjusted for each starting pitcher's ERA relative to league average, plus a standard home-field edge.</div>
+
+      <div class="field-row"><label>Game</label><select id="winGameSelect"><option value="">Loading games…</option></select></div>
+      <button class="primary" id="winCalcBtn" style="width:100%;">Calculate</button>
+    </div>
+
+    <div class="panel" id="winResultPanel" style="display:none;">
+      <div class="panel-title">Readout</div>
+      <div class="dual-readout">
+        <div class="team-prob-box">
+          <div class="tname" id="winAwayName">AWAY</div>
+          <div class="tprob" id="winAwayProb">--%</div>
+        </div>
+        <div class="team-prob-box">
+          <div class="tname" id="winHomeName">HOME</div>
+          <div class="tprob" id="winHomeProb">--%</div>
+        </div>
+      </div>
+      <div class="stat-grid" style="margin-top:10px;">
+        <div class="stat-box"><div class="k">Away Win% (season)</div><div class="v" id="winAwayWpct">--</div></div>
+        <div class="stat-box"><div class="k">Home Win% (season)</div><div class="v" id="winHomeWpct">--</div></div>
+        <div class="stat-box"><div class="k">Away SP ERA</div><div class="v" id="winAwayERA">--</div></div>
+        <div class="stat-box"><div class="k">Home SP ERA</div><div class="v" id="winHomeERA">--</div></div>
+      </div>
+      <div class="two-col" style="margin-top:12px;">
+        <button id="winSaveAwayBtn">Save: Away</button>
+        <button id="winSaveHomeBtn">Save: Home</button>
+      </div>
     </div>
   </div>
 
@@ -280,7 +407,12 @@
     </div>
   </div>
 
-  <div class="footer-note">MLB HR PROPS · v2 · Free public data via MLB Stats API + Open-Meteo</div>
+  <details class="debug">
+    <summary>Debug log (applies to every tab)</summary>
+    <div id="debugLog"></div>
+  </details>
+
+  <div class="footer-note">MLB PROPS · v3 · Free public data via MLB Stats API + Open-Meteo</div>
 </main>
 
 <script>
@@ -322,6 +454,11 @@ const ROOF_STATUS = { TB:'fixed', TOR:'retractable', ARI:'retractable', HOU:'ret
 
 const LEAGUE_AVG_HR_RATE = 0.031; // ~ HR per PA, league-wide approx
 const LEAGUE_AVG_HR9 = 1.25;      // ~ pitcher HR allowed per 9 IP, league-wide approx
+const LEAGUE_AVG_K_PCT = 0.225;   // ~ league strikeout rate per batter faced, approx
+const LEAGUE_AVG_ERA = 4.00;      // ~ league average ERA, approx
+const LEAGUE_AVG_RUNS_PER_GAME = 4.3; // ~ league average team runs/game, approx
+const HOME_FIELD_EDGE = 0.03;     // flat home-field win probability boost
+const OUTS_SD = 4.2;              // assumed std-dev (in outs) for the outs-recorded normal approximation
 const RECENT_GAMES_BATTER = 15;
 const RECENT_STARTS_PITCHER = 5;
 const RECENT_BLEND_WEIGHT = 0.5;  // how much weight recent form gets vs season, when sample is big enough
@@ -339,7 +476,10 @@ let state = {
   rosters: {},
   battingStatsCache: {},
   pitchingStatsCache: {},
-  weatherCache: {}
+  weatherCache: {},
+  teamKRateCache: {},
+  teamOffenseCache: {},
+  standings: null
 };
 
 /* =========================================================================
@@ -416,6 +556,7 @@ async function loadSchedule(dateStr){
   state.games = games;
   document.getElementById('slateCount').textContent = games.length ? `${games.length} games` : '';
   renderGames();
+  populateAuxGameSelects();
 }
 
 function renderGames(){
@@ -535,7 +676,7 @@ async function loadRoster(teamId){
    STATS LOOKUPS (single player, season + gameLog in one call, parallel-safe)
    ========================================================================= */
 function recentSplitRate(splits, n, type){
-  // type: 'hitting' -> {hr, pa}; 'pitching' -> {hr, ip}
+  // type: 'hitting' -> {hr, pa}; 'pitching' -> {hr, ip, k, bf, hr9, k_pct, starts, avgIP, avgBF}
   if(!splits || !splits.length) return null;
   const recent = splits.slice(-n);
   if(type === 'hitting'){
@@ -543,9 +684,20 @@ function recentSplitRate(splits, n, type){
     recent.forEach(s=>{ hr += Number(s.stat.homeRuns||0); pa += Number(s.stat.plateAppearances||0); });
     return pa > 0 ? {hr, pa, rate: hr/pa} : null;
   } else {
-    let hr=0, ip=0;
-    recent.forEach(s=>{ hr += Number(s.stat.homeRuns||0); ip += parseFloat(s.stat.inningsPitched||0); });
-    return ip > 0 ? {hr, ip, hr9: (hr/ip)*9} : null;
+    let hr=0, ip=0, k=0, bf=0;
+    recent.forEach(s=>{
+      hr += Number(s.stat.homeRuns||0);
+      ip += parseFloat(s.stat.inningsPitched||0);
+      k  += Number(s.stat.strikeOuts||0);
+      bf += Number(s.stat.battersFaced||0);
+    });
+    if(ip <= 0) return null;
+    return {
+      hr, ip, k, bf, hr9: (hr/ip)*9,
+      k_pct: bf > 0 ? k/bf : null,
+      starts: recent.length, avgIP: ip/recent.length,
+      avgBF: bf > 0 ? bf/recent.length : null
+    };
   }
 }
 
@@ -582,19 +734,54 @@ async function getPitcherStats(personId){
   const logGroup = groups.find(g=>g.type && g.type.displayName==='gameLog');
   const seasonStat = seasonGroup && seasonGroup.splits && seasonGroup.splits[0] && seasonGroup.splits[0].stat;
   if(!seasonStat) return null;
-  let seasonHR9 = seasonStat.homeRunsPer9;
+
   const seasonIP = parseFloat(seasonStat.inningsPitched || 0);
-  if(seasonHR9 == null && seasonIP > 0){
-    seasonHR9 = (Number(seasonStat.homeRuns||0) / seasonIP) * 9;
-  }
+  let seasonHR9 = seasonStat.homeRunsPer9;
+  if(seasonHR9 == null && seasonIP > 0) seasonHR9 = (Number(seasonStat.homeRuns||0) / seasonIP) * 9;
   if(seasonHR9 == null) return null;
 
+  const seasonBF = Number(seasonStat.battersFaced || 0);
+  const seasonK = Number(seasonStat.strikeOuts || 0);
+  const seasonK_pct = seasonBF > 0 ? seasonK/seasonBF : null;
+  const seasonERA = seasonStat.era != null ? parseFloat(seasonStat.era) : null;
+  const gamesStarted = Number(seasonStat.gamesStarted || 0);
+  const seasonIPperStart = gamesStarted > 0 ? seasonIP/gamesStarted : null;
+  const seasonBFperStart = gamesStarted > 0 ? seasonBF/gamesStarted : null;
+
   const recent = logGroup ? recentSplitRate(logGroup.splits, RECENT_STARTS_PITCHER, 'pitching') : null;
+
   let blendedHR9 = Number(seasonHR9);
-  if(recent && recent.ip >= 15){
-    blendedHR9 = (1-RECENT_BLEND_WEIGHT)*Number(seasonHR9) + RECENT_BLEND_WEIGHT*recent.hr9;
+  if(recent && recent.ip >= 15) blendedHR9 = (1-RECENT_BLEND_WEIGHT)*Number(seasonHR9) + RECENT_BLEND_WEIGHT*recent.hr9;
+
+  let blendedK_pct = seasonK_pct;
+  let recentForm = 'Season only — low recent sample';
+  if(recent && recent.bf >= 60 && seasonK_pct != null){
+    blendedK_pct = (1-RECENT_BLEND_WEIGHT)*seasonK_pct + RECENT_BLEND_WEIGHT*recent.k_pct;
+    recentForm = `L${RECENT_STARTS_PITCHER} blended (${RECENT_BLEND_WEIGHT*100}%)`;
+  } else if(recent && seasonK_pct == null && recent.k_pct != null){
+    blendedK_pct = recent.k_pct;
+    recentForm = `L${RECENT_STARTS_PITCHER} only — season K% unavailable`;
   }
-  const result = { seasonHR9: Number(seasonHR9), seasonIP, recentHR9: recent ? recent.hr9 : null, recentIP: recent ? recent.ip : 0, blendedHR9 };
+
+  let blendedIPperStart = seasonIPperStart;
+  if(recent && recent.starts >= 3 && seasonIPperStart != null){
+    blendedIPperStart = (1-RECENT_BLEND_WEIGHT)*seasonIPperStart + RECENT_BLEND_WEIGHT*recent.avgIP;
+  } else if(recent && seasonIPperStart == null){
+    blendedIPperStart = recent.avgIP;
+  }
+
+  let blendedBFperStart = seasonBFperStart;
+  if(recent && recent.starts >= 3 && seasonBFperStart != null && recent.avgBF != null){
+    blendedBFperStart = (1-RECENT_BLEND_WEIGHT)*seasonBFperStart + RECENT_BLEND_WEIGHT*recent.avgBF;
+  } else if(recent && seasonBFperStart == null && recent.avgBF != null){
+    blendedBFperStart = recent.avgBF;
+  }
+
+  const result = {
+    seasonHR9: Number(seasonHR9), seasonIP, recentHR9: recent ? recent.hr9 : null, recentIP: recent ? recent.ip : 0, blendedHR9,
+    seasonK_pct, blendedK_pct, seasonERA, gamesStarted,
+    seasonIPperStart, blendedIPperStart, seasonBFperStart, blendedBFperStart, recentForm
+  };
   state.pitchingStatsCache[personId] = result;
   return result;
 }
@@ -719,6 +906,76 @@ function tempFactorFor(weather){
 }
 
 /* =========================================================================
+   TEAM-LEVEL LOOKUPS (K's, Outs, Winners)
+   ========================================================================= */
+async function getTeamKRate(teamId){
+  if(state.teamKRateCache[teamId] !== undefined) return state.teamKRateCache[teamId];
+  const url = `${API}/teams/${teamId}/stats?stats=season&group=hitting&season=${seasonYear()}`;
+  const data = await safeFetchJSON(url, `team K rate ${teamId}`);
+  const stat = data && data.stats && data.stats[0] && data.stats[0].splits && data.stats[0].splits[0] && data.stats[0].splits[0].stat;
+  if(!stat || !Number(stat.plateAppearances)){ state.teamKRateCache[teamId] = null; return null; }
+  const result = Number(stat.strikeOuts||0) / Number(stat.plateAppearances);
+  state.teamKRateCache[teamId] = result;
+  return result;
+}
+
+async function getTeamOffenseRate(teamId){
+  // runs scored per game, season — used as a rough "lineup difficulty" signal for the Outs model
+  if(state.teamOffenseCache[teamId] !== undefined) return state.teamOffenseCache[teamId];
+  const url = `${API}/teams/${teamId}/stats?stats=season&group=hitting&season=${seasonYear()}`;
+  const data = await safeFetchJSON(url, `team offense ${teamId}`);
+  const stat = data && data.stats && data.stats[0] && data.stats[0].splits && data.stats[0].splits[0] && data.stats[0].splits[0].stat;
+  const games = stat && Number(stat.gamesPlayed||0);
+  if(!stat || !games){ state.teamOffenseCache[teamId] = null; return null; }
+  const result = Number(stat.runs||0) / games;
+  state.teamOffenseCache[teamId] = result;
+  return result;
+}
+
+async function getStandings(){
+  if(state.standings) return state.standings;
+  const url = `${API}/standings?leagueId=103,104&season=${seasonYear()}&standingsTypes=regularSeason`;
+  const data = await safeFetchJSON(url, `standings ${seasonYear()}`);
+  const map = {};
+  const records = (data && data.records) || [];
+  records.forEach(div=>{
+    (div.teamRecords||[]).forEach(tr=>{
+      map[tr.team.id] = {
+        wins: tr.wins, losses: tr.losses,
+        pct: tr.winningPercentage != null ? parseFloat(tr.winningPercentage) : (tr.wins/(tr.wins+tr.losses))
+      };
+    });
+  });
+  state.standings = Object.keys(map).length ? map : null;
+  return state.standings;
+}
+
+/* =========================================================================
+   STATISTICAL HELPERS
+   ========================================================================= */
+function poissonPMF(k, lambda){ return Math.exp(-lambda) * Math.pow(lambda, k) / factorial(k); }
+function factorial(n){ let r=1; for(let i=2;i<=n;i++) r*=i; return r; }
+function poissonCDF(k, lambda){
+  // P(X <= k)
+  let sum = 0;
+  for(let i=0;i<=k;i++) sum += poissonPMF(i, lambda);
+  return Math.min(1, sum);
+}
+function erf(x){
+  // Abramowitz-Stegun approximation
+  const sign = x < 0 ? -1 : 1; x = Math.abs(x);
+  const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
+  const t = 1/(1+p*x);
+  const y = 1 - (((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);
+  return sign*y;
+}
+function normalCDF(x, mean, sd){ return 0.5 * (1 + erf((x-mean)/(sd*Math.SQRT2))); }
+function log5(pA, pB){
+  const denom = pA + pB - 2*pA*pB;
+  return denom !== 0 ? (pA - pA*pB)/denom : 0.5;
+}
+
+/* =========================================================================
    CONFIDENCE CALC
    ========================================================================= */
 function calcConfidence({batRate, pitHR9, parkFactor, windMph, tempFactor, pa}){
@@ -795,7 +1052,7 @@ async function runCalculation(){
   document.getElementById('outRecent').textContent = recentNote;
 
   window.__lastCalc = {
-    batterName, pitcherName, gameProb: calc.gameProb, tag: tag.label,
+    propType: 'HR', batterName, pitcherName, gameProb: calc.gameProb, tag: tag.label,
     gamePk: state.selectedGame ? state.selectedGame.gamePk : null, date: state.date
   };
 }
@@ -887,7 +1144,7 @@ function renderLeaderboard(results){
       <div class="lb-score" style="color:${r.tag.color};">${pct(r.prob)}</div>
     `;
     row.addEventListener('click', ()=>{
-      window.__lastCalc = { batterName:r.name, pitcherName:r.opp, gameProb:r.prob, tag:r.tag.label, gamePk:r.gamePk, date:r.date };
+      window.__lastCalc = { propType:'HR', batterName:r.name, pitcherName:r.opp, gameProb:r.prob, tag:r.tag.label, gamePk:r.gamePk, date:r.date };
       saveCurrentPick();
     });
     wrap.appendChild(row);
@@ -899,21 +1156,442 @@ function renderLeaderboard(results){
   wrap.appendChild(hint);
 }
 
+function findGameByPk(pk){ return state.games.find(g=>String(g.gamePk)===String(pk)); }
+
+function populateAuxGameSelects(){
+  const optsHTML = state.games.length
+    ? state.games.map(g=>{
+        const awayAbbr = abbrForTeam(g.teams.away.team), homeAbbr = abbrForTeam(g.teams.home.team);
+        return `<option value="${g.gamePk}">${awayAbbr} @ ${homeAbbr}</option>`;
+      }).join('')
+    : '<option value="">No games for this date</option>';
+  ['ksGameSelect','outsGameSelect','winGameSelect'].forEach(id=>{
+    const sel = document.getElementById(id);
+    if(!sel) return;
+    sel.innerHTML = '<option value="">Select a game…</option>' + optsHTML;
+  });
+  populatePitcherSelect(document.getElementById('ksPitcherSelect'), null);
+  populatePitcherSelect(document.getElementById('outsPitcherSelect'), null);
+}
+
+function getProbablePitcherOptions(g){
+  const opts = [];
+  if(g.teams.away.probablePitcher) opts.push({ id:g.teams.away.probablePitcher.id, name:g.teams.away.probablePitcher.fullName, team:abbrForTeam(g.teams.away.team), oppTeamId:g.teams.home.team.id, oppAbbr:abbrForTeam(g.teams.home.team) });
+  if(g.teams.home.probablePitcher) opts.push({ id:g.teams.home.probablePitcher.id, name:g.teams.home.probablePitcher.fullName, team:abbrForTeam(g.teams.home.team), oppTeamId:g.teams.away.team.id, oppAbbr:abbrForTeam(g.teams.away.team) });
+  return opts;
+}
+function populatePitcherSelect(selectEl, g){
+  if(!selectEl) return;
+  selectEl.innerHTML = '';
+  if(!g){ selectEl.disabled = true; selectEl.innerHTML = '<option value="">—</option>'; return; }
+  const opts = getProbablePitcherOptions(g);
+  if(!opts.length){ selectEl.innerHTML = '<option value="">No probable pitchers listed — use Manual Mode</option>'; selectEl.disabled = true; return; }
+  opts.forEach(o=>{
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.dataset.oppTeamId = o.oppTeamId;
+    opt.dataset.oppAbbr = o.oppAbbr;
+    opt.textContent = `${o.name} (${o.team}) vs ${o.oppAbbr}`;
+    selectEl.appendChild(opt);
+  });
+  selectEl.disabled = false;
+}
+
+/* ---------- K's ---------- */
+function onKsGameChange(){
+  populatePitcherSelect(document.getElementById('ksPitcherSelect'), findGameByPk(document.getElementById('ksGameSelect').value));
+}
+
+async function runKsCalculation(){
+  const manual = document.getElementById('ksManualMode').checked;
+  const line = parseFloat(document.getElementById('ksLine').value || 5.5);
+  let pitcherK, oppK, bf, pitcherName='Pitcher', oppAbbr='Opp', recentNote='Manual entry', gamePk=null;
+
+  if(manual){
+    pitcherK = parseFloat(document.getElementById('ksManKpct').value);
+    oppK = parseFloat(document.getElementById('ksManOppKpct').value);
+    bf = parseFloat(document.getElementById('ksManBF').value || 21);
+    if(isNaN(pitcherK) || isNaN(oppK)){ alert('Enter pitcher K% and opponent K% first.'); return; }
+  } else {
+    const gameSel = document.getElementById('ksGameSelect');
+    const pitcherSel = document.getElementById('ksPitcherSelect');
+    const pitcherId = pitcherSel.value;
+    if(!gameSel.value || !pitcherId){ alert('Pick a game and pitcher first — or switch on Manual Mode.'); return; }
+    const opt = pitcherSel.options[pitcherSel.selectedIndex];
+    pitcherName = opt.textContent;
+    oppAbbr = opt.dataset.oppAbbr;
+    const oppTeamId = opt.dataset.oppTeamId;
+    gamePk = gameSel.value;
+
+    const [pitStats, oppKRate] = await Promise.all([getPitcherStats(pitcherId), getTeamKRate(oppTeamId)]);
+    if(!pitStats || pitStats.blendedK_pct == null || oppKRate == null){
+      alert('Live K stats failed to load for this matchup. Try Manual Mode instead.');
+      return;
+    }
+    pitcherK = pitStats.blendedK_pct;
+    oppK = oppKRate;
+    bf = pitStats.blendedBFperStart || (pitStats.blendedIPperStart ? pitStats.blendedIPperStart*4.2 : 21);
+    recentNote = pitStats.recentForm;
+  }
+
+  const pitRel = pitcherK / LEAGUE_AVG_K_PCT;
+  const oppRel = oppK / LEAGUE_AVG_K_PCT;
+  const matchupKpct = Math.max(0.05, Math.min(0.55, LEAGUE_AVG_K_PCT * pitRel * oppRel));
+  const lambda = matchupKpct * bf;
+
+  const underProb = poissonCDF(Math.floor(line), lambda);
+  const overProb = 1 - underProb;
+  const tag = overProb >= 0.6 ? {label:'Lean Over', color:'var(--clay-2)'} : overProb <= 0.4 ? {label:'Lean Under', color:'var(--cold)'} : {label:'Coinflip', color:'var(--mustard)'};
+
+  document.getElementById('ksResultPanel').style.display = 'block';
+  document.getElementById('ksProjNumber').textContent = lambda.toFixed(1);
+  document.getElementById('ksOverPct').textContent = pct(overProb);
+  document.getElementById('ksUnderPct').textContent = pct(underProb);
+  document.getElementById('ksPitRate').textContent = pct(pitcherK);
+  document.getElementById('ksOppRate').textContent = pct(oppK);
+  document.getElementById('ksBF').textContent = bf.toFixed(1);
+  document.getElementById('ksRecent').textContent = recentNote;
+  document.getElementById('ksTag').textContent = tag.label;
+  document.getElementById('ksTag').style.color = tag.color;
+  document.getElementById('ksTag').style.border = `1px solid ${tag.color}`;
+
+  window.__lastKsCalc = { pitcherName, oppAbbr, line, lambda, overProb, underProb, gamePk, date: state.date };
+}
+
+function saveKsPick(side){
+  const c = window.__lastKsCalc;
+  if(!c){ alert('Run a calculation first.'); return; }
+  const picks = loadPicks();
+  picks.unshift({
+    id:newId(), propType:'K', date:c.date, gamePk:c.gamePk,
+    subject:c.pitcherName, detail:`${side} ${c.line} Ks vs ${c.oppAbbr}`,
+    probability: side==='Over'?c.overProb:c.underProb, line:c.line, side,
+    tag:`Proj ${c.lambda.toFixed(1)}`, status:'pending'
+  });
+  savePicks(picks);
+  renderPicks();
+  alert('Saved to Tracking tab.');
+}
+
+async function runKsAutoScan(){
+  if(!state.games.length){ alert('No games loaded for this date yet.'); return; }
+  const scanBtn = document.getElementById('ksScanBtn');
+  scanBtn.disabled = true;
+  const progressEl = document.getElementById('ksScanProgress');
+  document.getElementById('ksLeaderboard').innerHTML = '';
+  progressEl.textContent = `Scanning 0 / ${state.games.length} games…`;
+
+  const allResults = [];
+  await runChunked(state.games, async (g)=>{
+    const opts = getProbablePitcherOptions(g);
+    await Promise.all(opts.map(async (o)=>{
+      const [pitStats, oppK] = await Promise.all([getPitcherStats(o.id), getTeamKRate(o.oppTeamId)]);
+      if(!pitStats || pitStats.blendedK_pct == null || oppK == null) return;
+      const bf = pitStats.blendedBFperStart || (pitStats.blendedIPperStart ? pitStats.blendedIPperStart*4.2 : 21);
+      const pitRel = pitStats.blendedK_pct / LEAGUE_AVG_K_PCT;
+      const oppRel = oppK / LEAGUE_AVG_K_PCT;
+      const matchupKpct = Math.max(0.05, Math.min(0.55, LEAGUE_AVG_K_PCT * pitRel * oppRel));
+      const lambda = matchupKpct * bf;
+      allResults.push({ name:o.name, team:o.team, opp:o.oppAbbr, lambda, bf, gamePk:g.gamePk, pitcherId:o.id });
+    }));
+  }, 4, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
+
+  allResults.sort((a,b)=> b.lambda - a.lambda);
+  renderKsLeaderboard(allResults.slice(0,30));
+  progressEl.textContent = `Done — ${allResults.length} pitchers evaluated across ${state.games.length} games.`;
+  scanBtn.disabled = false;
+}
+
+function renderKsLeaderboard(results){
+  const wrap = document.getElementById('ksLeaderboard');
+  if(!results.length){ wrap.innerHTML = '<div class="empty-state">No results — probable pitchers may not be listed yet for this date.</div>'; return; }
+  wrap.innerHTML = '';
+  results.forEach((r,i)=>{
+    const row = document.createElement('div');
+    row.className = 'leaderboard-row';
+    row.innerHTML = `
+      <div class="rank">${i+1}</div>
+      <div class="lb-main">
+        <div class="lb-name">${r.name} <span style="color:var(--chalk-dim); font-weight:400;">(${r.team})</span></div>
+        <div class="lb-meta">vs ${r.opp} · ${r.bf.toFixed(0)} proj. BF</div>
+      </div>
+      <div class="lb-score">${r.lambda.toFixed(1)} K</div>
+    `;
+    row.addEventListener('click', async ()=>{
+      document.getElementById('ksGameSelect').value = r.gamePk;
+      onKsGameChange();
+      document.getElementById('ksPitcherSelect').value = r.pitcherId;
+      await runKsCalculation();
+      document.getElementById('ksResultPanel').scrollIntoView({behavior:'smooth', block:'nearest'});
+    });
+    wrap.appendChild(row);
+  });
+  const hint = document.createElement('div');
+  hint.className = 'panel-desc'; hint.style.marginTop = '8px';
+  hint.textContent = 'Ranked by projected strikeouts. Tap a row to load it into the calculator with the real opponent K rate, then set your line.';
+  wrap.appendChild(hint);
+}
+
+/* ---------- Pitching Outs ---------- */
+function onOutsGameChange(){
+  populatePitcherSelect(document.getElementById('outsPitcherSelect'), findGameByPk(document.getElementById('outsGameSelect').value));
+}
+
+async function runOutsCalculation(){
+  const manual = document.getElementById('outsManualMode').checked;
+  const line = parseFloat(document.getElementById('outsLine').value || 15.5);
+  let ipPerStart, oppRunsPerGame, pitcherName='Pitcher', oppAbbr='Opp', gamePk=null;
+
+  if(manual){
+    ipPerStart = parseFloat(document.getElementById('outsManIP').value);
+    oppRunsPerGame = parseFloat(document.getElementById('outsManOppRuns').value);
+    if(isNaN(ipPerStart) || isNaN(oppRunsPerGame)){ alert('Enter avg IP/start and opponent runs/game first.'); return; }
+  } else {
+    const gameSel = document.getElementById('outsGameSelect');
+    const pitcherSel = document.getElementById('outsPitcherSelect');
+    const pitcherId = pitcherSel.value;
+    if(!gameSel.value || !pitcherId){ alert('Pick a game and pitcher first — or switch on Manual Mode.'); return; }
+    const opt = pitcherSel.options[pitcherSel.selectedIndex];
+    pitcherName = opt.textContent;
+    oppAbbr = opt.dataset.oppAbbr;
+    const oppTeamId = opt.dataset.oppTeamId;
+    gamePk = gameSel.value;
+
+    const [pitStats, oppOffense] = await Promise.all([getPitcherStats(pitcherId), getTeamOffenseRate(oppTeamId)]);
+    if(!pitStats || pitStats.blendedIPperStart == null){ alert('Live IP stats failed to load. Try Manual Mode instead.'); return; }
+    ipPerStart = pitStats.blendedIPperStart;
+    oppRunsPerGame = oppOffense != null ? oppOffense : LEAGUE_AVG_RUNS_PER_GAME;
+  }
+
+  const offenseFactor = Math.max(0.85, Math.min(1.12, 1 - (oppRunsPerGame - LEAGUE_AVG_RUNS_PER_GAME) * 0.02));
+  const projOuts = ipPerStart * 3 * offenseFactor;
+  const overProb = 1 - normalCDF(line, projOuts, OUTS_SD);
+  const underProb = 1 - overProb;
+  const tag = overProb >= 0.6 ? {label:'Lean Over', color:'var(--clay-2)'} : overProb <= 0.4 ? {label:'Lean Under', color:'var(--cold)'} : {label:'Coinflip', color:'var(--mustard)'};
+
+  document.getElementById('outsResultPanel').style.display = 'block';
+  document.getElementById('outsProjNumber').textContent = projOuts.toFixed(1);
+  document.getElementById('outsOverPct').textContent = pct(overProb);
+  document.getElementById('outsUnderPct').textContent = pct(underProb);
+  document.getElementById('outsIPstat').textContent = ipPerStart.toFixed(1);
+  document.getElementById('outsOppFactor').textContent = offenseFactor.toFixed(2)+'x';
+  document.getElementById('outsTag').textContent = tag.label;
+  document.getElementById('outsTag').style.color = tag.color;
+  document.getElementById('outsTag').style.border = `1px solid ${tag.color}`;
+
+  window.__lastOutsCalc = { pitcherName, oppAbbr, line, projOuts, overProb, underProb, gamePk, date: state.date };
+}
+
+function saveOutsPick(side){
+  const c = window.__lastOutsCalc;
+  if(!c){ alert('Run a calculation first.'); return; }
+  const picks = loadPicks();
+  picks.unshift({
+    id:newId(), propType:'OUTS', date:c.date, gamePk:c.gamePk,
+    subject:c.pitcherName, detail:`${side} ${c.line} outs vs ${c.oppAbbr}`,
+    probability: side==='Over'?c.overProb:c.underProb, line:c.line, side,
+    tag:`Proj ${c.projOuts.toFixed(1)}`, status:'pending'
+  });
+  savePicks(picks);
+  renderPicks();
+  alert('Saved to Tracking tab.');
+}
+
+async function runOutsAutoScan(){
+  if(!state.games.length){ alert('No games loaded for this date yet.'); return; }
+  const scanBtn = document.getElementById('outsScanBtn');
+  scanBtn.disabled = true;
+  const progressEl = document.getElementById('outsScanProgress');
+  document.getElementById('outsLeaderboard').innerHTML = '';
+  progressEl.textContent = `Scanning 0 / ${state.games.length} games…`;
+
+  const allResults = [];
+  await runChunked(state.games, async (g)=>{
+    const opts = getProbablePitcherOptions(g);
+    await Promise.all(opts.map(async (o)=>{
+      const [pitStats, oppOffense] = await Promise.all([getPitcherStats(o.id), getTeamOffenseRate(o.oppTeamId)]);
+      if(!pitStats || pitStats.blendedIPperStart == null) return;
+      const oppRunsPerGame = oppOffense != null ? oppOffense : LEAGUE_AVG_RUNS_PER_GAME;
+      const offenseFactor = Math.max(0.85, Math.min(1.12, 1 - (oppRunsPerGame - LEAGUE_AVG_RUNS_PER_GAME) * 0.02));
+      const projOuts = pitStats.blendedIPperStart * 3 * offenseFactor;
+      allResults.push({ name:o.name, team:o.team, opp:o.oppAbbr, projOuts, offenseFactor, gamePk:g.gamePk, pitcherId:o.id });
+    }));
+  }, 4, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
+
+  allResults.sort((a,b)=> b.projOuts - a.projOuts);
+  renderOutsLeaderboard(allResults.slice(0,30));
+  progressEl.textContent = `Done — ${allResults.length} pitchers evaluated across ${state.games.length} games.`;
+  scanBtn.disabled = false;
+}
+
+function renderOutsLeaderboard(results){
+  const wrap = document.getElementById('outsLeaderboard');
+  if(!results.length){ wrap.innerHTML = '<div class="empty-state">No results — probable pitchers may not be listed yet for this date.</div>'; return; }
+  wrap.innerHTML = '';
+  results.forEach((r,i)=>{
+    const row = document.createElement('div');
+    row.className = 'leaderboard-row';
+    row.innerHTML = `
+      <div class="rank">${i+1}</div>
+      <div class="lb-main">
+        <div class="lb-name">${r.name} <span style="color:var(--chalk-dim); font-weight:400;">(${r.team})</span></div>
+        <div class="lb-meta">vs ${r.opp} · offense factor ${r.offenseFactor.toFixed(2)}x</div>
+      </div>
+      <div class="lb-score">${r.projOuts.toFixed(1)}</div>
+    `;
+    row.addEventListener('click', async ()=>{
+      document.getElementById('outsGameSelect').value = r.gamePk;
+      onOutsGameChange();
+      document.getElementById('outsPitcherSelect').value = r.pitcherId;
+      await runOutsCalculation();
+      document.getElementById('outsResultPanel').scrollIntoView({behavior:'smooth', block:'nearest'});
+    });
+    wrap.appendChild(row);
+  });
+  const hint = document.createElement('div');
+  hint.className = 'panel-desc'; hint.style.marginTop = '8px';
+  hint.textContent = 'Ranked by projected outs recorded. Tap a row to load it into the calculator below.';
+  wrap.appendChild(hint);
+}
+
+/* ---------- Winners ---------- */
+async function computeWinProbForGame(g){
+  const away = g.teams.away.team, home = g.teams.home.team;
+  const awayAbbr = abbrForTeam(away), homeAbbr = abbrForTeam(home);
+
+  const standings = await getStandings();
+  const awayRec = standings ? standings[away.id] : null;
+  const homeRec = standings ? standings[home.id] : null;
+  const awayWpct = awayRec ? awayRec.pct : 0.5;
+  const homeWpct = homeRec ? homeRec.pct : 0.5;
+  const baseHomeProb = log5(homeWpct, awayWpct);
+
+  const awayPitcherId = g.teams.away.probablePitcher ? g.teams.away.probablePitcher.id : null;
+  const homePitcherId = g.teams.home.probablePitcher ? g.teams.home.probablePitcher.id : null;
+  const [awayPitStats, homePitStats] = await Promise.all([
+    awayPitcherId ? getPitcherStats(awayPitcherId) : Promise.resolve(null),
+    homePitcherId ? getPitcherStats(homePitcherId) : Promise.resolve(null)
+  ]);
+  const awayERA = (awayPitStats && awayPitStats.seasonERA != null) ? awayPitStats.seasonERA : LEAGUE_AVG_ERA;
+  const homeERA = (homePitStats && homePitStats.seasonERA != null) ? homePitStats.seasonERA : LEAGUE_AVG_ERA;
+  const pitcherAdj = Math.max(-0.08, Math.min(0.08, (awayERA - homeERA) * 0.03));
+
+  let homeProb = baseHomeProb + pitcherAdj + HOME_FIELD_EDGE;
+  homeProb = Math.max(0.05, Math.min(0.95, homeProb));
+  const awayProb = 1 - homeProb;
+
+  return {
+    awayAbbr, homeAbbr, awayProb, homeProb, awayWpct, homeWpct, awayRec, homeRec,
+    awayERA: awayPitStats && awayPitStats.seasonERA!=null ? awayPitStats.seasonERA : null,
+    homeERA: homePitStats && homePitStats.seasonERA!=null ? homePitStats.seasonERA : null,
+    gamePk: g.gamePk
+  };
+}
+
+async function runWinCalculation(){
+  const gameSel = document.getElementById('winGameSelect');
+  const g = findGameByPk(gameSel.value);
+  if(!g){ alert('Pick a game first.'); return; }
+  const r = await computeWinProbForGame(g);
+
+  document.getElementById('winResultPanel').style.display = 'block';
+  document.getElementById('winAwayName').textContent = r.awayAbbr;
+  document.getElementById('winHomeName').textContent = r.homeAbbr;
+  document.getElementById('winAwayProb').textContent = pct(r.awayProb);
+  document.getElementById('winHomeProb').textContent = pct(r.homeProb);
+  document.getElementById('winAwayWpct').textContent = r.awayRec ? pct(r.awayWpct) : 'N/A (.500 used)';
+  document.getElementById('winHomeWpct').textContent = r.homeRec ? pct(r.homeWpct) : 'N/A (.500 used)';
+  document.getElementById('winAwayERA').textContent = r.awayERA != null ? r.awayERA.toFixed(2) : 'N/A';
+  document.getElementById('winHomeERA').textContent = r.homeERA != null ? r.homeERA.toFixed(2) : 'N/A';
+
+  window.__lastWinCalc = { awayAbbr:r.awayAbbr, homeAbbr:r.homeAbbr, awayProb:r.awayProb, homeProb:r.homeProb, gamePk: r.gamePk, date: state.date };
+}
+
+async function runWinAutoScan(){
+  if(!state.games.length){ alert('No games loaded for this date yet.'); return; }
+  const scanBtn = document.getElementById('winScanBtn');
+  scanBtn.disabled = true;
+  const progressEl = document.getElementById('winScanProgress');
+  document.getElementById('winLeaderboard').innerHTML = '';
+  progressEl.textContent = `Scanning 0 / ${state.games.length} games…`;
+
+  const allResults = await runChunked(state.games, async (g)=>{
+    return await computeWinProbForGame(g);
+  }, 4, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
+
+  allResults.sort((a,b)=> Math.max(b.homeProb,b.awayProb) - Math.max(a.homeProb,a.awayProb));
+  renderWinLeaderboard(allResults);
+  progressEl.textContent = `Done — ${allResults.length} games evaluated.`;
+  scanBtn.disabled = false;
+}
+
+function renderWinLeaderboard(results){
+  const wrap = document.getElementById('winLeaderboard');
+  if(!results.length){ wrap.innerHTML = '<div class="empty-state">No games found for this date.</div>'; return; }
+  wrap.innerHTML = '';
+  results.forEach((r,i)=>{
+    const favIsHome = r.homeProb >= r.awayProb;
+    const favAbbr = favIsHome ? r.homeAbbr : r.awayAbbr;
+    const favProb = favIsHome ? r.homeProb : r.awayProb;
+    const row = document.createElement('div');
+    row.className = 'leaderboard-row';
+    row.innerHTML = `
+      <div class="rank">${i+1}</div>
+      <div class="lb-main">
+        <div class="lb-name">${r.awayAbbr} @ ${r.homeAbbr}</div>
+        <div class="lb-meta">Favorite: ${favAbbr}</div>
+      </div>
+      <div class="lb-score">${pct(favProb)}</div>
+    `;
+    row.addEventListener('click', async ()=>{
+      document.getElementById('winGameSelect').value = r.gamePk;
+      await runWinCalculation();
+      document.getElementById('winResultPanel').scrollIntoView({behavior:'smooth', block:'nearest'});
+    });
+    wrap.appendChild(row);
+  });
+  const hint = document.createElement('div');
+  hint.className = 'panel-desc'; hint.style.marginTop = '8px';
+  hint.textContent = 'Sorted by biggest favorite first. Tap a row to load it into the calculator below.';
+  wrap.appendChild(hint);
+}
+
+function saveWinPick(side){
+  const c = window.__lastWinCalc;
+  if(!c){ alert('Run a calculation first.'); return; }
+  const picks = loadPicks();
+  const prob = side==='Home' ? c.homeProb : c.awayProb;
+  const teamAbbr = side==='Home' ? c.homeAbbr : c.awayAbbr;
+  picks.unshift({
+    id:newId(), propType:'WINNER', date:c.date, gamePk:c.gamePk,
+    subject:`${teamAbbr} ML`, detail:`${c.awayAbbr} @ ${c.homeAbbr}`,
+    probability:prob, line:null, side, tag:`${pct(prob)} model`, status:'pending'
+  });
+  savePicks(picks);
+  renderPicks();
+  alert('Saved to Tracking tab.');
+}
+
 /* =========================================================================
-   PICK TRACKING
+   PICK TRACKING (unified across all four prop types)
    ========================================================================= */
 const PICKS_KEY = 'mlb_hr_picks';
+function newId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,5); }
 function loadPicks(){ try{ return JSON.parse(localStorage.getItem(PICKS_KEY) || '[]'); }catch(e){ return []; } }
 function savePicks(picks){ localStorage.setItem(PICKS_KEY, JSON.stringify(picks)); }
+function parseInningsToOuts(ip){
+  const s = String(ip); const parts = s.split('.');
+  return Number(parts[0]||0)*3 + Number(parts[1]||0);
+}
 
 function saveCurrentPick(){
   const c = window.__lastCalc;
   if(!c){ alert('Run a calculation first.'); return; }
   const picks = loadPicks();
   picks.unshift({
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2,5),
-    date: c.date, gamePk: c.gamePk, batterName: c.batterName, pitcherName: c.pitcherName,
-    probability: c.gameProb, tag: c.tag, status: 'pending'
+    id: newId(), propType:'HR', date:c.date, gamePk:c.gamePk,
+    subject: c.batterName, detail: `HR vs ${c.pitcherName}`,
+    probability: c.gameProb, line:null, side:null, tag:c.tag, status:'pending'
   });
   savePicks(picks);
   renderPicks();
@@ -923,7 +1601,7 @@ function renderPicks(){
   const picks = loadPicks();
   const wrap = document.getElementById('picksList');
   let wins=0, losses=0, pending=0;
-  picks.forEach(p=>{ if(p.status==='win') wins++; else if(p.status==='loss') losses++; else pending++; });
+  picks.forEach(p=>{ if(p.status==='win') wins++; else if(p.status==='loss') losses++; else if(p.status==='pending') pending++; });
   document.getElementById('recWins').textContent = wins;
   document.getElementById('recLosses').textContent = losses;
   document.getElementById('recPending').textContent = pending;
@@ -931,18 +1609,18 @@ function renderPicks(){
   document.getElementById('recRate').textContent = decided ? pct(wins/decided) : '--';
 
   if(!picks.length){
-    wrap.innerHTML = '<div class="empty-state">No saved picks yet. Build a matchup in HR Props and save it.</div>';
+    wrap.innerHTML = '<div class="empty-state">No saved picks yet. Build a matchup in any tab and save it.</div>';
     return;
   }
   wrap.innerHTML = '';
   picks.forEach(p=>{
     const row = document.createElement('div');
     row.className = 'pick-row';
-    const statusClass = p.status==='win' ? 'status-win' : p.status==='loss' ? 'status-loss' : 'status-pending';
+    const statusClass = p.status==='win' ? 'status-win' : (p.status==='loss' || p.status==='push') ? 'status-loss' : 'status-pending';
     row.innerHTML = `
       <div class="pick-main">
-        <div class="pick-name">${p.batterName}</div>
-        <div class="pick-meta">${p.date} · vs ${p.pitcherName} · ${pct(p.probability)} (${p.tag})</div>
+        <div class="pick-name"><span class="type-chip">${p.propType}</span>${p.subject}</div>
+        <div class="pick-meta">${p.date} · ${p.detail} · ${pct(p.probability)} (${p.tag})</div>
       </div>
       <div style="display:flex; align-items:center; gap:6px;">
         <span class="pick-status ${statusClass}">${p.status}</span>
@@ -966,19 +1644,54 @@ async function gradePick(id){
   const url = `${API}/game/${pick.gamePk}/boxscore`;
   const data = await safeFetchJSON(url, `boxscore ${pick.gamePk}`);
   if(!data){ alert('Could not load box score yet — game may not be final.'); return; }
-  let hr = null;
-  ['home','away'].forEach(side=>{
-    const players = data.teams && data.teams[side] && data.teams[side].players;
-    if(!players) return;
-    Object.values(players).forEach(pl=>{
-      if(pick.batterName.startsWith(pl.person.fullName)){
-        const batting = pl.stats && pl.stats.batting;
-        if(batting && batting.homeRuns != null) hr = batting.homeRuns;
-      }
+
+  function findPlayer(){
+    let found = null;
+    ['home','away'].forEach(side=>{
+      const players = data.teams && data.teams[side] && data.teams[side].players;
+      if(!players) return;
+      Object.values(players).forEach(pl=>{
+        if(pick.subject.startsWith(pl.person.fullName)) found = pl;
+      });
     });
-  });
-  if(hr == null){ alert('Could not find this batter in the box score (game may be in progress, or name match failed).'); return; }
-  pick.status = hr > 0 ? 'win' : 'loss';
+    return found;
+  }
+
+  if(pick.propType === 'HR'){
+    const pl = findPlayer();
+    const hr = pl && pl.stats && pl.stats.batting && pl.stats.batting.homeRuns;
+    if(hr == null){ alert('Could not find this batter in the box score (game may be in progress, or name match failed).'); return; }
+    pick.status = hr > 0 ? 'win' : 'loss';
+  }
+
+  else if(pick.propType === 'K'){
+    const pl = findPlayer();
+    const actualK = pl && pl.stats && pl.stats.pitching && pl.stats.pitching.strikeOuts;
+    if(actualK == null){ alert('Could not find this pitcher in the box score.'); return; }
+    if(actualK === pick.line) pick.status = 'push';
+    else if(pick.side === 'Over') pick.status = actualK > pick.line ? 'win' : 'loss';
+    else pick.status = actualK < pick.line ? 'win' : 'loss';
+  }
+
+  else if(pick.propType === 'OUTS'){
+    const pl = findPlayer();
+    const ip = pl && pl.stats && pl.stats.pitching && pl.stats.pitching.inningsPitched;
+    if(ip == null){ alert('Could not find this pitcher in the box score.'); return; }
+    const actualOuts = parseInningsToOuts(ip);
+    if(actualOuts === pick.line) pick.status = 'push';
+    else if(pick.side === 'Over') pick.status = actualOuts > pick.line ? 'win' : 'loss';
+    else pick.status = actualOuts < pick.line ? 'win' : 'loss';
+  }
+
+  else if(pick.propType === 'WINNER'){
+    const homeRuns = data.teams && data.teams.home && data.teams.home.teamStats && data.teams.home.teamStats.batting && data.teams.home.teamStats.batting.runs;
+    const awayRuns = data.teams && data.teams.away && data.teams.away.teamStats && data.teams.away.teamStats.batting && data.teams.away.teamStats.batting.runs;
+    if(homeRuns == null || awayRuns == null){ alert('Final score not available yet.'); return; }
+    if(homeRuns === awayRuns){ alert('Game tied/in progress — try again once final.'); return; }
+    const winnerSide = homeRuns > awayRuns ? 'Home' : 'Away';
+    pick.status = pick.side === winnerSide ? 'win' : 'loss';
+  }
+
   savePicks(picks);
   renderPicks();
 }
@@ -1021,6 +1734,29 @@ function init(){
   document.getElementById('manualMode').addEventListener('change', (e)=>{
     document.getElementById('manualFields').style.display = e.target.checked ? 'block' : 'none';
   });
+
+  document.getElementById('ksGameSelect').addEventListener('change', onKsGameChange);
+  document.getElementById('ksCalcBtn').addEventListener('click', runKsCalculation);
+  document.getElementById('ksSaveOverBtn').addEventListener('click', ()=> saveKsPick('Over'));
+  document.getElementById('ksSaveUnderBtn').addEventListener('click', ()=> saveKsPick('Under'));
+  document.getElementById('ksScanBtn').addEventListener('click', runKsAutoScan);
+  document.getElementById('ksManualMode').addEventListener('change', (e)=>{
+    document.getElementById('ksManualFields').style.display = e.target.checked ? 'block' : 'none';
+  });
+
+  document.getElementById('outsGameSelect').addEventListener('change', onOutsGameChange);
+  document.getElementById('outsCalcBtn').addEventListener('click', runOutsCalculation);
+  document.getElementById('outsSaveOverBtn').addEventListener('click', ()=> saveOutsPick('Over'));
+  document.getElementById('outsSaveUnderBtn').addEventListener('click', ()=> saveOutsPick('Under'));
+  document.getElementById('outsScanBtn').addEventListener('click', runOutsAutoScan);
+  document.getElementById('outsManualMode').addEventListener('change', (e)=>{
+    document.getElementById('outsManualFields').style.display = e.target.checked ? 'block' : 'none';
+  });
+
+  document.getElementById('winCalcBtn').addEventListener('click', runWinCalculation);
+  document.getElementById('winScanBtn').addEventListener('click', runWinAutoScan);
+  document.getElementById('winSaveAwayBtn').addEventListener('click', ()=> saveWinPick('Away'));
+  document.getElementById('winSaveHomeBtn').addEventListener('click', ()=> saveWinPick('Home'));
 
   loadSchedule(state.date);
   renderPicks();
