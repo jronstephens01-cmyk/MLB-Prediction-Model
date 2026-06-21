@@ -87,6 +87,24 @@
   .team-prob-box .tprob{font-family:var(--mono); font-size:34px; font-weight:700; margin:6px 0 0;}
   .type-chip{font-family:var(--mono); font-size:10px; padding:2px 6px; border-radius:4px; border:1px solid var(--line-strong); color:var(--chalk-dim); margin-right:6px; text-transform:uppercase;}
 
+  .odds-status{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); margin-top:6px; min-height:14px;}
+  .edge-pill{display:inline-block; font-family:var(--mono); font-size:12px; font-weight:700; padding:3px 10px; border-radius:14px; margin-top:4px;}
+  .edge-take{background:rgba(124,198,138,0.15); color:#7CC68A; border:1px solid #7CC68A;}
+  .edge-pass{background:rgba(74,111,165,0.15); color:var(--cold); border:1px solid var(--cold);}
+  .edge-close{background:rgba(232,163,61,0.12); color:var(--mustard); border:1px solid var(--mustard);}
+  .best-bet-card{background:linear-gradient(135deg, rgba(193,80,46,0.18), rgba(232,163,61,0.10)); border:1px solid var(--mustard); border-radius:10px; padding:12px; margin-bottom:10px;}
+  .best-bet-label{font-family:var(--mono); font-size:10px; letter-spacing:1px; color:var(--mustard); text-transform:uppercase;}
+  .best-bet-name{font-family:var(--display); font-size:22px; text-transform:uppercase; color:var(--chalk); margin:4px 0 2px;}
+  .best-bet-meta{font-family:var(--mono); font-size:12px; color:var(--chalk-dim);}
+
+  .parlay-leg-row{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px; border-bottom:1px solid var(--line);}
+  .parlay-leg-row:last-child{border-bottom:none;}
+  .parlay-leg-main{flex:1;}
+  .parlay-leg-name{font-weight:700; font-size:13px;}
+  .parlay-leg-meta{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); margin-top:2px;}
+  .parlay-summary{display:flex; gap:14px; font-family:var(--mono); font-size:12px; color:var(--chalk-dim); margin-top:10px; padding-top:10px; border-top:1px solid var(--line);}
+  .parlay-summary b{color:var(--chalk); font-size:16px; display:block;}
+
   .leaderboard-row{display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid var(--line); cursor:pointer;}
   .leaderboard-row:last-child{border-bottom:none;}
   .leaderboard-row:hover{background:rgba(244,241,234,0.04);}
@@ -142,6 +160,7 @@
   <button class="tab-btn" data-tab="ks">K's</button>
   <button class="tab-btn" data-tab="outs">Pitching Outs</button>
   <button class="tab-btn" data-tab="winners">Winners</button>
+  <button class="tab-btn" data-tab="parlay">Parlay</button>
   <button class="tab-btn" data-tab="tracking">Tracking</button>
 </nav>
 
@@ -158,8 +177,11 @@
     <div class="panel">
       <div class="panel-title">Auto Scan</div>
       <div class="panel-desc">Ranks batters across today's slate by HR likelihood automatically. Uses season + last-15-game blended rates. Wind direction isn't applied here (unreliable without confirmed park orientation per-stadium) — only park factor and temperature are baked into the rank. Can take a while on a big slate.</div>
+      <button class="ghost" id="hrLoadOddsBtn" type="button" style="width:100%; margin-bottom:8px;">Load Live Lines (DraftKings/FanDuel)</button>
+      <div class="odds-status" id="hrOddsStatus"></div>
       <button class="primary" id="scanBtn" style="width:100%;">Scan Today's Slate</button>
       <div class="progress-text" id="scanProgress"></div>
+      <div id="hrBestBet"></div>
       <div id="leaderboard" style="margin-top:10px;"></div>
     </div>
 
@@ -238,8 +260,12 @@
           <div class="stat-box"><div class="k">Wind Adj.</div><div class="v" id="outWind">--</div></div>
           <div class="stat-box"><div class="k">Recent Form</div><div class="v" id="outRecent">--</div></div>
         </div>
+        <div id="hrEdgeBlock"></div>
       </div>
-      <button id="savePickBtn" style="width:100%; margin-top:12px;">Save to Pick Tracking</button>
+      <div class="two-col" style="margin-top:12px;">
+        <button id="savePickBtn">Save to Tracking</button>
+        <button id="hrAddParlayBtn">Add to Parlay</button>
+      </div>
     </div>
   </div>
 
@@ -248,8 +274,11 @@
     <div class="panel">
       <div class="panel-title">Auto Scan</div>
       <div class="panel-desc">Ranks every probable starter on today's slate by projected strikeouts. Tap a row to load it into the calculator below with a real opposing-team K rate.</div>
+      <button class="ghost" id="ksLoadOddsBtn" type="button" style="width:100%; margin-bottom:8px;">Load Live Lines (DraftKings/FanDuel)</button>
+      <div class="odds-status" id="ksOddsStatus"></div>
       <button class="primary" id="ksScanBtn" style="width:100%;">Scan Today's Slate</button>
       <div class="progress-text" id="ksScanProgress"></div>
+      <div id="ksBestBet"></div>
       <div id="ksLeaderboard" style="margin-top:10px;"></div>
     </div>
 
@@ -290,11 +319,13 @@
           <div class="stat-box"><div class="k">Proj. Batters Faced</div><div class="v" id="ksBF">--</div></div>
           <div class="stat-box"><div class="k">Recent Form</div><div class="v" id="ksRecent">--</div></div>
         </div>
+        <div id="ksEdgeBlock"></div>
       </div>
       <div class="two-col" style="margin-top:12px;">
         <button id="ksSaveOverBtn">Save: Over</button>
         <button id="ksSaveUnderBtn">Save: Under</button>
       </div>
+      <button id="ksAddParlayBtn" style="width:100%; margin-top:8px;">Add to Parlay</button>
     </div>
   </div>
 
@@ -303,8 +334,11 @@
     <div class="panel">
       <div class="panel-title">Auto Scan</div>
       <div class="panel-desc">Ranks every probable starter on today's slate by projected outs recorded, factoring opponent offense strength. Tap a row to load it into the calculator below.</div>
+      <button class="ghost" id="outsLoadOddsBtn" type="button" style="width:100%; margin-bottom:8px;">Load Live Lines (DraftKings/FanDuel)</button>
+      <div class="odds-status" id="outsOddsStatus"></div>
       <button class="primary" id="outsScanBtn" style="width:100%;">Scan Today's Slate</button>
       <div class="progress-text" id="outsScanProgress"></div>
+      <div id="outsBestBet"></div>
       <div id="outsLeaderboard" style="margin-top:10px;"></div>
     </div>
 
@@ -342,11 +376,13 @@
           <div class="stat-box"><div class="k">Avg IP / Start</div><div class="v" id="outsIPstat">--</div></div>
           <div class="stat-box"><div class="k">Opp Offense Factor</div><div class="v" id="outsOppFactor">--</div></div>
         </div>
+        <div id="outsEdgeBlock"></div>
       </div>
       <div class="two-col" style="margin-top:12px;">
         <button id="outsSaveOverBtn">Save: Over</button>
         <button id="outsSaveUnderBtn">Save: Under</button>
       </div>
+      <button id="outsAddParlayBtn" style="width:100%; margin-top:8px;">Add to Parlay</button>
     </div>
   </div>
 
@@ -355,8 +391,11 @@
     <div class="panel">
       <div class="panel-title">Auto Scan</div>
       <div class="panel-desc">Runs the win model across every game on today's slate at once, biggest favorites first. Tap a row to load it into the calculator below.</div>
+      <button class="ghost" id="winLoadOddsBtn" type="button" style="width:100%; margin-bottom:8px;">Load Live Lines (DraftKings/FanDuel)</button>
+      <div class="odds-status" id="winOddsStatus"></div>
       <button class="primary" id="winScanBtn" style="width:100%;">Scan Today's Slate</button>
       <div class="progress-text" id="winScanProgress"></div>
+      <div id="winBestBet"></div>
       <div id="winLeaderboard" style="margin-top:10px;"></div>
     </div>
 
@@ -386,10 +425,27 @@
         <div class="stat-box"><div class="k">Away SP ERA</div><div class="v" id="winAwayERA">--</div></div>
         <div class="stat-box"><div class="k">Home SP ERA</div><div class="v" id="winHomeERA">--</div></div>
       </div>
+      <div id="winEdgeBlock"></div>
       <div class="two-col" style="margin-top:12px;">
         <button id="winSaveAwayBtn">Save: Away</button>
         <button id="winSaveHomeBtn">Save: Home</button>
       </div>
+      <button id="winAddParlayBtn" style="width:100%; margin-top:8px;">Add to Parlay</button>
+    </div>
+  </div>
+
+  <!-- ============ PARLAY TAB ============ -->
+  <div id="tab-parlay" style="display:none;">
+    <div class="panel">
+      <div class="panel-title">Parlay Builder</div>
+      <div class="panel-desc">Combines whatever you've added from HR Props, K's, Outs, and Winners. Combined probability assumes each leg is independent — same-game legs are usually correlated in reality (e.g. a team winning big and their hitters going over HR props), so treat the combined number as optimistic, not exact.</div>
+      <div id="parlayLegs"><div class="empty-state">No legs yet. Hit "Add to Parlay" from any readout.</div></div>
+      <div class="parlay-summary" id="parlaySummary" style="display:none;">
+        <div>Legs<b id="parlayLegCount">0</b></div>
+        <div>Combined Probability<b id="parlayCombinedProb">--</b></div>
+        <div>Combined Payout<b id="parlayCombinedPayout">--</b></div>
+      </div>
+      <button id="parlayClearBtn" class="ghost" style="width:100%; margin-top:10px;">Clear Parlay</button>
     </div>
   </div>
 
@@ -465,6 +521,9 @@ const RECENT_BLEND_WEIGHT = 0.5;  // how much weight recent form gets vs season,
 
 const API = "https://statsapi.mlb.com/api/v1";
 const WEATHER_API = "https://api.open-meteo.com/v1/forecast";
+const ODDS_PROXY = "https://mlb-odds-proxy.jronstephens01.workers.dev/odds/api/v1";
+const PROP_MARKET = { HR:'player_home_runs', K:'player_strikeouts', OUTS:'player_pitching_outs' };
+const EDGE_TAKE_THRESHOLD = 0.03;  // model prob vs sportsbook implied prob, in absolute probability points
 
 /* =========================================================================
    STATE
@@ -479,7 +538,8 @@ let state = {
   weatherCache: {},
   teamKRateCache: {},
   teamOffenseCache: {},
-  standings: null
+  standings: null,
+  liveOdds: {}   // marketSlug -> flat array of odds rows from SharpAPI
 };
 
 /* =========================================================================
@@ -976,6 +1036,81 @@ function log5(pA, pB){
 }
 
 /* =========================================================================
+   LIVE ODDS (SharpAPI via Cloudflare Worker proxy)
+   ========================================================================= */
+async function loadLiveOdds(marketSlug, statusElId){
+  const statusEl = statusElId ? document.getElementById(statusElId) : null;
+  if(statusEl) statusEl.textContent = 'Loading live lines…';
+  const url = `${ODDS_PROXY}/odds?league=mlb&market=${marketSlug}&group_by=event&limit=200`;
+  const data = await safeFetchJSON(url, `live odds ${marketSlug}`);
+  if(!data || !data.data){
+    if(statusEl) statusEl.textContent = 'Could not load live lines — check the Worker / API key.';
+    return [];
+  }
+  const flat = [];
+  data.data.forEach(ev=>{ (ev.odds||[]).forEach(row=> flat.push(row)); });
+  state.liveOdds[marketSlug] = flat;
+  if(statusEl){
+    const updated = data.updated_at ? new Date(data.updated_at).toLocaleTimeString() : '';
+    statusEl.textContent = `Loaded ${flat.length} lines (DraftKings/FanDuel) — updated ${updated}`;
+  }
+  return flat;
+}
+
+function findPlayerOdds(marketSlug, playerName, opts){
+  const rows = state.liveOdds[marketSlug];
+  if(!rows || !playerName) return null;
+  opts = opts || {};
+  const wantType = opts.selectionType || 'over';
+  const candidates = rows.filter(r =>
+    r.player_name && (r.player_name === playerName || playerName.startsWith(r.player_name) || r.player_name.startsWith(playerName)) &&
+    r.selection_type === wantType
+  );
+  if(!candidates.length) return null;
+  // prefer the main line if there are several alt lines for the same player
+  const main = candidates.find(r => r.is_main_line);
+  return main || candidates[0];
+}
+
+function findMoneylineOddsForTeam(rows, teamName){
+  if(!rows) return null;
+  return rows.find(r => r.market_type === 'moneyline' && (r.selection === teamName || r.home_team === teamName || r.away_team === teamName) && r.selection === teamName) || null;
+}
+
+function edgeTag(edge){
+  if(edge >= EDGE_TAKE_THRESHOLD) return {label:'Take', cls:'edge-take'};
+  if(edge <= -EDGE_TAKE_THRESHOLD) return {label:'Pass', cls:'edge-pass'};
+  return {label:'Close — no real edge', cls:'edge-close'};
+}
+
+// Renders the little "live line / edge / suggestion" block used in every readout panel.
+function renderEdgeBlock(elId, oddsRow, modelProb){
+  const el = document.getElementById(elId);
+  if(!el) return;
+  if(!oddsRow){
+    el.innerHTML = `<div class="odds-status">No live line loaded for this player/market yet — tap "Load Live Lines" above.</div>`;
+    return;
+  }
+  const implied = oddsRow.odds_probability;
+  const edge = modelProb - implied;
+  const tag = edgeTag(edge);
+  el.innerHTML = `
+    <div class="stat-grid" style="margin-top:10px;">
+      <div class="stat-box"><div class="k">${oddsRow.sportsbook}</div><div class="v">${oddsRow.odds_american>0?'+':''}${oddsRow.odds_american}</div></div>
+      <div class="stat-box"><div class="k">Implied Prob</div><div class="v">${pct(implied)}</div></div>
+    </div>
+    <div class="edge-pill ${tag.cls}">${tag.label} · Edge ${edge>=0?'+':''}${(edge*100).toFixed(1)}pts</div>
+  `;
+}
+
+function americanToDecimal(odds){
+  return odds > 0 ? 1 + odds/100 : 1 + 100/Math.abs(odds);
+}
+function decimalToAmerican(dec){
+  return dec >= 2 ? Math.round((dec-1)*100) : Math.round(-100/(dec-1));
+}
+
+/* =========================================================================
    CONFIDENCE CALC
    ========================================================================= */
 function calcConfidence({batRate, pitHR9, parkFactor, windMph, tempFactor, pa}){
@@ -1051,9 +1186,13 @@ async function runCalculation(){
   document.getElementById('outWind').textContent = (windMph>=0?'+':'') + windMph + ' mph';
   document.getElementById('outRecent').textContent = recentNote;
 
+  const hrOddsRow = findPlayerOdds(PROP_MARKET.HR, batterName.split(' (')[0]);
+  renderEdgeBlock('hrEdgeBlock', hrOddsRow, calc.gameProb);
+
   window.__lastCalc = {
     propType: 'HR', batterName, pitcherName, gameProb: calc.gameProb, tag: tag.label,
-    gamePk: state.selectedGame ? state.selectedGame.gamePk : null, date: state.date
+    gamePk: state.selectedGame ? state.selectedGame.gamePk : null, date: state.date,
+    oddsRow: hrOddsRow
   };
 }
 
@@ -1121,6 +1260,10 @@ async function runAutoScan(){
 
   allResults.sort((a,b)=> b.prob - a.prob);
   renderLeaderboard(allResults.slice(0,30));
+  renderBestBet('hrBestBet', allResults.map(r=>({
+    subject:r.name, detail:`(${r.team}) vs ${r.opp}`, probability:r.prob,
+    oddsRow: findPlayerOdds(PROP_MARKET.HR, r.name)
+  })));
   progressEl.textContent = `Done — ${allResults.length} batters evaluated across ${state.games.length} games.`;
   scanBtn.disabled = false;
 }
@@ -1255,7 +1398,10 @@ async function runKsCalculation(){
   document.getElementById('ksTag').style.color = tag.color;
   document.getElementById('ksTag').style.border = `1px solid ${tag.color}`;
 
-  window.__lastKsCalc = { pitcherName, oppAbbr, line, lambda, overProb, underProb, gamePk, date: state.date };
+  const ksOddsRow = findPlayerOdds(PROP_MARKET.K, pitcherName.split(' (')[0]);
+  renderEdgeBlock('ksEdgeBlock', ksOddsRow, overProb);
+
+  window.__lastKsCalc = { pitcherName, oppAbbr, line, lambda, overProb, underProb, gamePk, date: state.date, oddsRow: ksOddsRow };
 }
 
 function saveKsPick(side){
@@ -1298,6 +1444,11 @@ async function runKsAutoScan(){
 
   allResults.sort((a,b)=> b.lambda - a.lambda);
   renderKsLeaderboard(allResults.slice(0,30));
+  renderBestBet('ksBestBet', allResults.map(r=>{
+    const oddsRow = findPlayerOdds(PROP_MARKET.K, r.name);
+    const overProb = oddsRow ? 1 - poissonCDF(Math.floor(oddsRow.line), r.lambda) : r.lambda/15; // rough fallback scale if no line yet
+    return { subject:r.name, detail:`(${r.team}) vs ${r.opp} · proj ${r.lambda.toFixed(1)} K`, probability: oddsRow ? overProb : r.lambda/15, oddsRow };
+  }));
   progressEl.textContent = `Done — ${allResults.length} pitchers evaluated across ${state.games.length} games.`;
   scanBtn.disabled = false;
 }
@@ -1379,7 +1530,10 @@ async function runOutsCalculation(){
   document.getElementById('outsTag').style.color = tag.color;
   document.getElementById('outsTag').style.border = `1px solid ${tag.color}`;
 
-  window.__lastOutsCalc = { pitcherName, oppAbbr, line, projOuts, overProb, underProb, gamePk, date: state.date };
+  const outsOddsRow = findPlayerOdds(PROP_MARKET.OUTS, pitcherName.split(' (')[0]);
+  renderEdgeBlock('outsEdgeBlock', outsOddsRow, overProb);
+
+  window.__lastOutsCalc = { pitcherName, oppAbbr, line, projOuts, overProb, underProb, gamePk, date: state.date, oddsRow: outsOddsRow };
 }
 
 function saveOutsPick(side){
@@ -1420,6 +1574,11 @@ async function runOutsAutoScan(){
 
   allResults.sort((a,b)=> b.projOuts - a.projOuts);
   renderOutsLeaderboard(allResults.slice(0,30));
+  renderBestBet('outsBestBet', allResults.map(r=>{
+    const oddsRow = findPlayerOdds(PROP_MARKET.OUTS, r.name);
+    const overProb = oddsRow ? 1 - normalCDF(oddsRow.line, r.projOuts, OUTS_SD) : r.projOuts/20;
+    return { subject:r.name, detail:`(${r.team}) vs ${r.opp} · proj ${r.projOuts.toFixed(1)} outs`, probability: overProb, oddsRow };
+  }));
   progressEl.textContent = `Done — ${allResults.length} pitchers evaluated across ${state.games.length} games.`;
   scanBtn.disabled = false;
 }
@@ -1481,7 +1640,7 @@ async function computeWinProbForGame(g){
   const awayProb = 1 - homeProb;
 
   return {
-    awayAbbr, homeAbbr, awayProb, homeProb, awayWpct, homeWpct, awayRec, homeRec,
+    awayAbbr, homeAbbr, awayName: away.name, homeName: home.name, awayProb, homeProb, awayWpct, homeWpct, awayRec, homeRec,
     awayERA: awayPitStats && awayPitStats.seasonERA!=null ? awayPitStats.seasonERA : null,
     homeERA: homePitStats && homePitStats.seasonERA!=null ? homePitStats.seasonERA : null,
     gamePk: g.gamePk
@@ -1504,7 +1663,26 @@ async function runWinCalculation(){
   document.getElementById('winAwayERA').textContent = r.awayERA != null ? r.awayERA.toFixed(2) : 'N/A';
   document.getElementById('winHomeERA').textContent = r.homeERA != null ? r.homeERA.toFixed(2) : 'N/A';
 
-  window.__lastWinCalc = { awayAbbr:r.awayAbbr, homeAbbr:r.homeAbbr, awayProb:r.awayProb, homeProb:r.homeProb, gamePk: r.gamePk, date: state.date };
+  const mlRows = state.liveOdds.moneyline || null;
+  const awayOddsRow = findMoneylineOddsForTeam(mlRows, r.awayName);
+  const homeOddsRow = findMoneylineOddsForTeam(mlRows, r.homeName);
+  const edgeBlockEl = document.getElementById('winEdgeBlock');
+  if(awayOddsRow || homeOddsRow){
+    const awayEdge = awayOddsRow ? r.awayProb - awayOddsRow.odds_probability : null;
+    const homeEdge = homeOddsRow ? r.homeProb - homeOddsRow.odds_probability : null;
+    edgeBlockEl.innerHTML = `
+      <div class="stat-grid" style="margin-top:10px;">
+        <div class="stat-box"><div class="k">${r.awayAbbr} ML</div><div class="v">${awayOddsRow ? (awayOddsRow.odds_american>0?'+':'')+awayOddsRow.odds_american : 'N/A'}</div></div>
+        <div class="stat-box"><div class="k">${r.homeAbbr} ML</div><div class="v">${homeOddsRow ? (homeOddsRow.odds_american>0?'+':'')+homeOddsRow.odds_american : 'N/A'}</div></div>
+      </div>
+      ${awayEdge!=null ? `<div class="edge-pill ${edgeTag(awayEdge).cls}">${r.awayAbbr}: ${edgeTag(awayEdge).label} · Edge ${awayEdge>=0?'+':''}${(awayEdge*100).toFixed(1)}pts</div>` : ''}
+      ${homeEdge!=null ? `<div class="edge-pill ${edgeTag(homeEdge).cls}" style="margin-left:6px;">${r.homeAbbr}: ${edgeTag(homeEdge).label} · Edge ${homeEdge>=0?'+':''}${(homeEdge*100).toFixed(1)}pts</div>` : ''}
+    `;
+  } else {
+    edgeBlockEl.innerHTML = `<div class="odds-status">No live moneyline loaded yet — tap "Load Live Lines" above.</div>`;
+  }
+
+  window.__lastWinCalc = { awayAbbr:r.awayAbbr, homeAbbr:r.homeAbbr, awayProb:r.awayProb, homeProb:r.homeProb, gamePk: r.gamePk, date: state.date, awayOddsRow, homeOddsRow };
 }
 
 async function runWinAutoScan(){
@@ -1521,6 +1699,15 @@ async function runWinAutoScan(){
 
   allResults.sort((a,b)=> Math.max(b.homeProb,b.awayProb) - Math.max(a.homeProb,a.awayProb));
   renderWinLeaderboard(allResults);
+  const mlRows = state.liveOdds.moneyline || null;
+  const winCandidates = [];
+  allResults.forEach(r=>{
+    const awayOdds = findMoneylineOddsForTeam(mlRows, r.awayName);
+    const homeOdds = findMoneylineOddsForTeam(mlRows, r.homeName);
+    winCandidates.push({ subject:`${r.awayAbbr} ML`, detail:`${r.awayAbbr} @ ${r.homeAbbr}`, probability:r.awayProb, oddsRow:awayOdds });
+    winCandidates.push({ subject:`${r.homeAbbr} ML`, detail:`${r.awayAbbr} @ ${r.homeAbbr}`, probability:r.homeProb, oddsRow:homeOdds });
+  });
+  renderBestBet('winBestBet', winCandidates);
   progressEl.textContent = `Done — ${allResults.length} games evaluated.`;
   scanBtn.disabled = false;
 }
@@ -1697,18 +1884,115 @@ async function gradePick(id){
 }
 
 /* =========================================================================
-   TABS
+   PARLAY BUILDER
    ========================================================================= */
+const PARLAY_KEY = 'mlb_parlay_legs';
+function loadParlayLegs(){ try{ return JSON.parse(localStorage.getItem(PARLAY_KEY) || '[]'); }catch(e){ return []; } }
+function saveParlayLegs(legs){ localStorage.setItem(PARLAY_KEY, JSON.stringify(legs)); }
+
+function addToParlay(leg){
+  const legs = loadParlayLegs();
+  legs.push(Object.assign({ id:newId() }, leg));
+  saveParlayLegs(legs);
+  renderParlay();
+  alert('Added to parlay.');
+}
+function removeFromParlay(id){
+  const legs = loadParlayLegs().filter(l=>l.id!==id);
+  saveParlayLegs(legs);
+  renderParlay();
+}
+
+function renderParlay(){
+  const legs = loadParlayLegs();
+  const wrap = document.getElementById('parlayLegs');
+  const summary = document.getElementById('parlaySummary');
+  if(!legs.length){
+    wrap.innerHTML = '<div class="empty-state">No legs yet. Hit "Add to Parlay" from any readout.</div>';
+    summary.style.display = 'none';
+    return;
+  }
+  wrap.innerHTML = '';
+  legs.forEach(l=>{
+    const row = document.createElement('div');
+    row.className = 'parlay-leg-row';
+    row.innerHTML = `
+      <div class="parlay-leg-main">
+        <div class="parlay-leg-name"><span class="type-chip">${l.propType}</span>${l.subject}</div>
+        <div class="parlay-leg-meta">${l.detail} · model ${pct(l.probability)}${l.oddsAmerican!=null ? ` · ${l.oddsAmerican>0?'+':''}${l.oddsAmerican}` : ''}</div>
+      </div>
+      <button data-id="${l.id}" class="parlayRemoveBtn">Remove</button>
+    `;
+    wrap.appendChild(row);
+  });
+  document.querySelectorAll('.parlayRemoveBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=> removeFromParlay(btn.dataset.id));
+  });
+
+  const combinedProb = legs.reduce((p,l)=> p*l.probability, 1);
+  document.getElementById('parlayLegCount').textContent = legs.length;
+  document.getElementById('parlayCombinedProb').textContent = pct(combinedProb);
+
+  const haveAllOdds = legs.every(l=>l.oddsAmerican!=null);
+  if(haveAllOdds){
+    const combinedDecimal = legs.reduce((p,l)=> p*americanToDecimal(l.oddsAmerican), 1);
+    const americanOut = decimalToAmerican(combinedDecimal);
+    document.getElementById('parlayCombinedPayout').textContent = `${americanOut>0?'+':''}${americanOut}`;
+  } else {
+    document.getElementById('parlayCombinedPayout').textContent = 'Missing odds on some legs';
+  }
+  summary.style.display = 'flex';
+}
+
+function clearParlay(){
+  saveParlayLegs([]);
+  renderParlay();
+}
+
+/* =========================================================================
+   BEST BET CALLOUTS (shown above each Auto Scan leaderboard once live lines
+   are loaded — picks the single highest-edge play, falling back to the
+   highest model probability if no live odds are loaded yet)
+   ========================================================================= */
+function renderBestBet(containerId, candidates){
+  // candidates: [{ subject, detail, probability, oddsRow }]
+  const el = document.getElementById(containerId);
+  if(!el || !candidates.length){ if(el) el.innerHTML = ''; return; }
+
+  let best = null, bestScore = -Infinity, usingEdge = false;
+  candidates.forEach(c=>{
+    if(c.oddsRow){
+      const edge = c.probability - c.oddsRow.odds_probability;
+      if(edge > bestScore){ bestScore = edge; best = c; usingEdge = true; }
+    }
+  });
+  if(!best){
+    candidates.forEach(c=>{ if(c.probability > bestScore){ bestScore = c.probability; best = c; } });
+    usingEdge = false;
+  }
+  if(!best){ el.innerHTML = ''; return; }
+
+  el.innerHTML = `
+    <div class="best-bet-card">
+      <div class="best-bet-label">${usingEdge ? '🔥 Best Edge On The Slate' : '🔥 Top Projection (load live lines for real edge)'}</div>
+      <div class="best-bet-name">${best.subject}</div>
+      <div class="best-bet-meta">${best.detail}${usingEdge ? ` · model ${pct(best.probability)} · edge ${bestScore>=0?'+':''}${(bestScore*100).toFixed(1)}pts` : ''}</div>
+    </div>
+  `;
+}
+
+
 function wireTabs(){
   document.querySelectorAll('.tab-btn').forEach(btn=>{
     if(btn.disabled) return;
     btn.addEventListener('click', ()=>{
       document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
-      ['hr','ks','outs','winners','tracking'].forEach(t=>{
+      ['hr','ks','outs','winners','parlay','tracking'].forEach(t=>{
         document.getElementById('tab-'+t).style.display = (t === btn.dataset.tab) ? 'block' : 'none';
       });
       if(btn.dataset.tab === 'tracking') renderPicks();
+      if(btn.dataset.tab === 'parlay') renderParlay();
     });
   });
 }
@@ -1758,8 +2042,43 @@ function init(){
   document.getElementById('winSaveAwayBtn').addEventListener('click', ()=> saveWinPick('Away'));
   document.getElementById('winSaveHomeBtn').addEventListener('click', ()=> saveWinPick('Home'));
 
+  document.getElementById('hrLoadOddsBtn').addEventListener('click', ()=> loadLiveOdds(PROP_MARKET.HR, 'hrOddsStatus'));
+  document.getElementById('ksLoadOddsBtn').addEventListener('click', ()=> loadLiveOdds(PROP_MARKET.K, 'ksOddsStatus'));
+  document.getElementById('outsLoadOddsBtn').addEventListener('click', ()=> loadLiveOdds(PROP_MARKET.OUTS, 'outsOddsStatus'));
+  document.getElementById('winLoadOddsBtn').addEventListener('click', ()=> loadLiveOdds('moneyline', 'winOddsStatus'));
+
+  document.getElementById('hrAddParlayBtn').addEventListener('click', ()=>{
+    const c = window.__lastCalc;
+    if(!c){ alert('Run a calculation first.'); return; }
+    addToParlay({ propType:'HR', subject:c.batterName, detail:`HR vs ${c.pitcherName}`, probability:c.gameProb, oddsAmerican: c.oddsRow ? c.oddsRow.odds_american : null, gamePk:c.gamePk });
+  });
+  document.getElementById('ksAddParlayBtn').addEventListener('click', ()=>{
+    const c = window.__lastKsCalc;
+    if(!c){ alert('Run a calculation first.'); return; }
+    addToParlay({ propType:'K', subject:c.pitcherName, detail:`Over ${c.line} Ks vs ${c.oppAbbr}`, probability:c.overProb, oddsAmerican: c.oddsRow ? c.oddsRow.odds_american : null, gamePk:c.gamePk });
+  });
+  document.getElementById('outsAddParlayBtn').addEventListener('click', ()=>{
+    const c = window.__lastOutsCalc;
+    if(!c){ alert('Run a calculation first.'); return; }
+    addToParlay({ propType:'OUTS', subject:c.pitcherName, detail:`Over ${c.line} outs vs ${c.oppAbbr}`, probability:c.overProb, oddsAmerican: c.oddsRow ? c.oddsRow.odds_american : null, gamePk:c.gamePk });
+  });
+  document.getElementById('winAddParlayBtn').addEventListener('click', ()=>{
+    const c = window.__lastWinCalc;
+    if(!c){ alert('Run a calculation first.'); return; }
+    const useHome = c.homeProb >= c.awayProb;
+    const row = useHome ? c.homeOddsRow : c.awayOddsRow;
+    addToParlay({
+      propType:'WINNER', subject:`${useHome?c.homeAbbr:c.awayAbbr} ML`, detail:`${c.awayAbbr} @ ${c.homeAbbr}`,
+      probability: useHome ? c.homeProb : c.awayProb, oddsAmerican: row ? row.odds_american : null, gamePk:c.gamePk
+    });
+  });
+  document.getElementById('parlayClearBtn').addEventListener('click', ()=>{
+    if(confirm('Clear all parlay legs?')) clearParlay();
+  });
+
   loadSchedule(state.date);
   renderPicks();
+  renderParlay();
 }
 
 init();
