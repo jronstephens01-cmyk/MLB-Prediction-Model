@@ -105,6 +105,36 @@
   .parlay-summary{display:flex; gap:14px; font-family:var(--mono); font-size:12px; color:var(--chalk-dim); margin-top:10px; padding-top:10px; border-top:1px solid var(--line);}
   .parlay-summary b{color:var(--chalk); font-size:16px; display:block;}
 
+  /* Props Lab */
+  .lab-filter-row{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;}
+  .lab-filter-btn{font-size:12px; padding:5px 10px; border-radius:14px;}
+  .lab-filter-btn.active{background:var(--mustard); border-color:var(--mustard); color:var(--ink);}
+  .lab-prop-row{padding:10px; border-bottom:1px solid var(--line);}
+  .lab-prop-row:last-child{border-bottom:none;}
+  .lab-prop-header{display:flex; justify-content:space-between; align-items:flex-start; gap:8px;}
+  .lab-prop-name{font-weight:700; font-size:13px;}
+  .lab-prop-meta{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); margin-top:2px;}
+  .lab-prop-nums{display:flex; gap:8px; margin-top:6px; font-family:var(--mono); font-size:11px; flex-wrap:wrap;}
+  .lab-num{background:var(--ink); border:1px solid var(--line); border-radius:6px; padding:4px 8px;}
+  .lab-num span{color:var(--chalk-dim);}
+  .tier-badge{font-family:var(--mono); font-size:10px; padding:2px 7px; border-radius:4px; white-space:nowrap;}
+  .tier-strong{background:rgba(193,80,46,0.25); color:var(--clay-2); border:1px solid var(--clay-2);}
+  .tier-medium{background:rgba(232,163,61,0.15); color:var(--mustard); border:1px solid var(--mustard);}
+  .tier-small{background:rgba(244,241,234,0.08); color:var(--chalk-dim); border:1px solid var(--line-strong);}
+  .reliability-card{background:var(--ink); border:1px solid var(--line); border-radius:8px; padding:10px; margin-bottom:8px;}
+  .reliability-header{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+  .reliability-title{font-family:var(--mono); font-size:12px; text-transform:uppercase;}
+  .reliability-pct{font-family:var(--mono); font-size:20px; font-weight:700;}
+  .reliability-bar-track{height:6px; background:rgba(244,241,234,0.08); border-radius:4px; overflow:hidden;}
+  .reliability-bar-fill{height:100%; border-radius:4px;}
+  .reliability-detail{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); margin-top:4px;}
+
+  .bucket-row{display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid var(--line); font-size:13px;}
+  .bucket-row:last-child{border-bottom:none;}
+  .bucket-label{font-weight:700;}
+  .bucket-sample{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); margin-top:1px;}
+  .bucket-rate{font-family:var(--mono); font-weight:700; font-size:16px;}
+
   .leaderboard-row{display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid var(--line); cursor:pointer;}
   .leaderboard-row:last-child{border-bottom:none;}
   .leaderboard-row:hover{background:rgba(244,241,234,0.04);}
@@ -161,7 +191,9 @@
   <button class="tab-btn" data-tab="outs">Pitching Outs</button>
   <button class="tab-btn" data-tab="winners">Winners</button>
   <button class="tab-btn" data-tab="parlay">Parlay</button>
+  <button class="tab-btn" data-tab="lab">Props Lab</button>
   <button class="tab-btn" data-tab="tracking">Tracking</button>
+  <button class="tab-btn" data-tab="reliability">Reliability</button>
 </nav>
 
 <main>
@@ -449,6 +481,32 @@
     </div>
   </div>
 
+  <!-- ============ PROPS LAB TAB ============ -->
+  <div id="tab-lab" style="display:none;">
+
+    <div class="panel">
+      <div class="panel-title">Reliability By Type</div>
+      <div class="panel-desc">Hit rate breakdown once props are graded. A model worth following should beat 50% on "Take" calls — especially in the Strong Edge tier. Build up at least 20–30 graded picks per type before trusting the number.</div>
+      <div id="labReliability"><div class="empty-state">No graded props yet. Load lines, capture edges, then grade them after games finish.</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Tracked Props <small id="labCount"></small></div>
+      <div class="panel-desc">Auto-captured any time you load live lines and our model sees an edge. Grade after the game to build the reliability record.</div>
+      <div class="lab-filter-row">
+        <button class="lab-filter-btn active" data-filter="all">All</button>
+        <button class="lab-filter-btn" data-filter="HR">HR</button>
+        <button class="lab-filter-btn" data-filter="K">K's</button>
+        <button class="lab-filter-btn" data-filter="OUTS">Outs</button>
+        <button class="lab-filter-btn" data-filter="WINNER">Winners</button>
+        <button class="lab-filter-btn" data-filter="pending">Pending</button>
+        <button class="lab-filter-btn" data-filter="strong">Strong Edge</button>
+      </div>
+      <div id="labList"><div class="empty-state">Load live lines on any tab to start capturing props.</div></div>
+    </div>
+
+  </div>
+
   <!-- ============ TRACKING TAB ============ -->
   <div id="tab-tracking" style="display:none;">
     <div class="panel">
@@ -460,6 +518,41 @@
         <div><b id="recRate">--</b> Hit Rate</div>
       </div>
       <div id="picksList"><div class="empty-state">No saved picks yet. Build a matchup in HR Props and save it.</div></div>
+    </div>
+  </div>
+
+  <!-- ============ RELIABILITY TAB ============ -->
+  <div id="tab-reliability" style="display:none;">
+    <div class="panel">
+      <div class="panel-title">Offered Props Log</div>
+      <div class="panel-desc">Every time you run Auto Scan with live lines loaded, every player the model evaluated against a real sportsbook line gets logged here automatically — not just the ones you saved. That's the full sample needed to actually prove (or disprove) whether the edge number means anything, instead of cherry-picking only the picks you liked.</div>
+      <button class="primary" id="gradeAllOfferedBtn" style="width:100%;">Grade All Pending</button>
+      <div class="progress-text" id="gradeAllProgress"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Overall Record</div>
+      <div class="record-bar">
+        <div><b id="relWins">0</b> Wins</div>
+        <div><b id="relLosses">0</b> Losses</div>
+        <div><b id="relPending">0</b> Pending</div>
+        <div><b id="relRate">--</b> Hit Rate</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Hit Rate By Edge <small>does a positive edge actually predict a win?</small></div>
+      <div id="edgeBucketTable"><div class="empty-state">Not enough graded picks yet.</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Hit Rate By Prop Type</div>
+      <div id="typeBucketTable"><div class="empty-state">Not enough graded picks yet.</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Full Log</div>
+      <div id="offeredPropsList"><div class="empty-state">Nothing logged yet — run Auto Scan with live lines loaded on any prop tab.</div></div>
     </div>
   </div>
 
@@ -1054,6 +1147,22 @@ async function loadLiveOdds(marketSlug, statusElId){
     const updated = data.updated_at ? new Date(data.updated_at).toLocaleTimeString() : '';
     statusEl.textContent = `Loaded ${flat.length} lines (DraftKings/FanDuel) — updated ${updated}`;
   }
+
+  // Auto-capture edge plays to Props Lab
+  const propTypeMap = {
+    [PROP_MARKET.HR]:'HR',
+    [PROP_MARKET.K]:'K',
+    [PROP_MARKET.OUTS]:'OUTS',
+    'moneyline':'WINNER'
+  };
+  const labPropType = propTypeMap[marketSlug];
+  if(labPropType && flat.length){
+    const captured = captureLabProps(marketSlug, labPropType, flat);
+    if(statusEl && captured > 0){
+      statusEl.textContent += ` · ${captured} new edge plays captured to Props Lab`;
+    }
+  }
+
   return flat;
 }
 
@@ -1260,10 +1369,13 @@ async function runAutoScan(){
 
   allResults.sort((a,b)=> b.prob - a.prob);
   renderLeaderboard(allResults.slice(0,30));
-  renderBestBet('hrBestBet', allResults.map(r=>({
+  const hrCandidates = allResults.map(r=>({
     subject:r.name, detail:`(${r.team}) vs ${r.opp}`, probability:r.prob,
-    oddsRow: findPlayerOdds(PROP_MARKET.HR, r.name)
-  })));
+    oddsRow: findPlayerOdds(PROP_MARKET.HR, r.name), gamePk:r.gamePk
+  }));
+  renderBestBet('hrBestBet', hrCandidates);
+  const hrLogged = logOfferedProps('HR', hrCandidates, null);
+  if(hrLogged) logDebug(`Logged ${hrLogged} HR props to Reliability log`, true);
   progressEl.textContent = `Done — ${allResults.length} batters evaluated across ${state.games.length} games.`;
   scanBtn.disabled = false;
 }
@@ -1444,11 +1556,14 @@ async function runKsAutoScan(){
 
   allResults.sort((a,b)=> b.lambda - a.lambda);
   renderKsLeaderboard(allResults.slice(0,30));
-  renderBestBet('ksBestBet', allResults.map(r=>{
+  const ksCandidates = allResults.map(r=>{
     const oddsRow = findPlayerOdds(PROP_MARKET.K, r.name);
     const overProb = oddsRow ? 1 - poissonCDF(Math.floor(oddsRow.line), r.lambda) : r.lambda/15; // rough fallback scale if no line yet
-    return { subject:r.name, detail:`(${r.team}) vs ${r.opp} · proj ${r.lambda.toFixed(1)} K`, probability: oddsRow ? overProb : r.lambda/15, oddsRow };
-  }));
+    return { subject:r.name, detail:`(${r.team}) vs ${r.opp} · proj ${r.lambda.toFixed(1)} K`, probability: oddsRow ? overProb : r.lambda/15, oddsRow, gamePk:r.gamePk };
+  });
+  renderBestBet('ksBestBet', ksCandidates);
+  const ksLogged = logOfferedProps('K', ksCandidates, 'Over');
+  if(ksLogged) logDebug(`Logged ${ksLogged} K props to Reliability log`, true);
   progressEl.textContent = `Done — ${allResults.length} pitchers evaluated across ${state.games.length} games.`;
   scanBtn.disabled = false;
 }
@@ -1982,17 +2097,275 @@ function renderBestBet(containerId, candidates){
 }
 
 
+/* =========================================================================
+   PROPS LAB — auto-capture, grading, reliability engine
+   ========================================================================= */
+const LAB_KEY = 'mlb_props_lab';
+let labFilter = 'all';
+
+function loadLabProps(){ try{ return JSON.parse(localStorage.getItem(LAB_KEY) || '[]'); }catch(e){ return []; } }
+function saveLabProps(props){ localStorage.setItem(LAB_KEY, JSON.stringify(props)); }
+
+// Called automatically when live odds are loaded. Captures all props where
+// model edge > threshold, keyed by player+date+propType+side to avoid duplicates.
+function captureLabProps(marketSlug, propType, rows){
+  const existing = loadLabProps();
+  const keySet = new Set(existing.map(p=>p.key));
+  const newProps = [];
+
+  rows.forEach(row=>{
+    if(!row.is_player_prop && propType !== 'WINNER') return;
+    const modelProb = getModelProbForRow(propType, row);
+    if(modelProb === null) return;
+    const implied = row.odds_probability;
+    const edge = modelProb - implied;
+    if(edge < 0.01) return; // only capture plays where we see at least a small edge
+
+    const subject = row.player_name || row.selection || '?';
+    const key = `${state.date}_${propType}_${subject}_${row.selection_type}_${row.line}`;
+    if(keySet.has(key)) return;
+    keySet.add(key);
+
+    const tier = edge >= 0.07 ? 'strong' : edge >= 0.04 ? 'medium' : 'small';
+    newProps.push({
+      id: newId(), key,
+      date: state.date,
+      propType, subject,
+      detail: `${row.selection_type === 'over' ? 'Over' : row.selection_type === 'under' ? 'Under' : row.selection_type} ${row.line != null ? row.line : ''} · ${row.market_type}`,
+      matchup: `${row.away_team || '?'} @ ${row.home_team || '?'}`,
+      sportsbook: row.sportsbook,
+      oddsAmerican: row.odds_american,
+      impliedProb: implied,
+      modelProb,
+      edge,
+      tier,
+      status: 'pending',
+      gamePk: null
+    });
+  });
+
+  if(newProps.length){
+    saveLabProps([...existing, ...newProps]);
+    logDebug(`Props Lab: captured ${newProps.length} new edge plays (${propType})`, true);
+  }
+  return newProps.length;
+}
+
+// Look up our model's probability for a given live odds row.
+// Falls back to null if we don't have a fresh model calc for this player yet.
+function getModelProbForRow(propType, row){
+  const playerName = row.player_name || row.selection;
+  if(propType === 'HR'){
+    const batStats = state.battingStatsCache[row.player_name ? playerName : null];
+    if(!batStats) return null;
+    const parkFactor = PARK_FACTORS[row.home_team ? abbrFromName(row.home_team) : ''] || 1.0;
+    const calc = calcConfidence({batRate:batStats.blendedRate, pitHR9:LEAGUE_AVG_HR9, parkFactor, windMph:0, tempFactor:1, pa:4.1});
+    return calc.gameProb;
+  }
+  if(propType === 'K'){
+    const pitStats = state.pitchingStatsCache[playerName];
+    if(!pitStats || pitStats.blendedK_pct == null || row.line == null) return null;
+    const bf = pitStats.blendedBFperStart || 21;
+    const lambda = pitStats.blendedK_pct * bf;
+    return 1 - poissonCDF(Math.floor(row.line), lambda);
+  }
+  if(propType === 'OUTS'){
+    const pitStats = state.pitchingStatsCache[playerName];
+    if(!pitStats || pitStats.blendedIPperStart == null || row.line == null) return null;
+    const projOuts = pitStats.blendedIPperStart * 3;
+    return 1 - normalCDF(row.line, projOuts, OUTS_SD);
+  }
+  return null;
+}
+
+function abbrFromName(fullName){
+  // find abbreviation from our park factors by matching partial team name
+  for(const abbr of Object.keys(PARK_FACTORS)){
+    if(fullName.includes(abbr)) return abbr;
+  }
+  // try the team name in our games list
+  const g = state.games.find(g=>g.teams.home.team.name === fullName || g.teams.away.team.name === fullName);
+  if(g){
+    const t = g.teams.home.team.name === fullName ? g.teams.home.team : g.teams.away.team;
+    return abbrForTeam(t);
+  }
+  return fullName.split(' ').pop().slice(0,3).toUpperCase();
+}
+
+function edgeTierLabel(tier){
+  if(tier === 'strong') return { cls:'tier-strong', label:'Strong >7pts' };
+  if(tier === 'medium') return { cls:'tier-medium', label:'Medium 4–7pts' };
+  return { cls:'tier-small', label:'Small 1–4pts' };
+}
+
+function renderLab(){
+  const allProps = loadLabProps();
+  const labCount = document.getElementById('labCount');
+  const labList = document.getElementById('labList');
+  if(labCount) labCount.textContent = `${allProps.length} captured`;
+
+  // Build reliability stats
+  renderLabReliability(allProps);
+
+  // Apply filter
+  let filtered = allProps;
+  if(labFilter === 'pending') filtered = allProps.filter(p=>p.status==='pending');
+  else if(labFilter === 'strong') filtered = allProps.filter(p=>p.tier==='strong');
+  else if(['HR','K','OUTS','WINNER'].includes(labFilter)) filtered = allProps.filter(p=>p.propType===labFilter);
+
+  filtered = [...filtered].sort((a,b)=> new Date(b.date)-new Date(a.date) || b.edge-a.edge);
+
+  if(!filtered.length){
+    labList.innerHTML = '<div class="empty-state">No props match this filter.</div>';
+    return;
+  }
+
+  labList.innerHTML = '';
+  filtered.forEach(p=>{
+    const tier = edgeTierLabel(p.tier);
+    const statusClass = p.status==='win'?'status-win':p.status==='loss'?'status-loss':p.status==='push'?'status-loss':'status-pending';
+    const row = document.createElement('div');
+    row.className = 'lab-prop-row';
+    row.innerHTML = `
+      <div class="lab-prop-header">
+        <div>
+          <div class="lab-prop-name">
+            <span class="type-chip">${p.propType}</span>${p.subject}
+            <span class="tier-badge ${tier.cls}" style="margin-left:6px;">${tier.label}</span>
+          </div>
+          <div class="lab-prop-meta">${p.date} · ${p.matchup} · ${p.detail}</div>
+        </div>
+        <span class="pick-status ${statusClass}">${p.status}</span>
+      </div>
+      <div class="lab-prop-nums">
+        <div class="lab-num"><span>Our Model</span> ${pct(p.modelProb)}</div>
+        <div class="lab-num"><span>${p.sportsbook}</span> ${p.oddsAmerican>0?'+':''}${p.oddsAmerican}</div>
+        <div class="lab-num"><span>Implied</span> ${pct(p.impliedProb)}</div>
+        <div class="lab-num" style="color:${p.edge>=0.07?'var(--clay-2)':p.edge>=0.04?'var(--mustard)':'var(--chalk-dim)'}"><span>Edge</span> +${(p.edge*100).toFixed(1)}pts</div>
+      </div>
+      ${p.status==='pending' ? `<div style="margin-top:8px; display:flex; gap:6px;">
+        <button class="labGradeWin" data-id="${p.id}" style="font-size:11px; padding:5px 10px;">Win</button>
+        <button class="labGradeLoss" data-id="${p.id}" style="font-size:11px; padding:5px 10px;">Loss</button>
+        <button class="labGradePush" data-id="${p.id}" style="font-size:11px; padding:5px 10px;">Push</button>
+        <button class="labRemove" data-id="${p.id}" style="font-size:11px; padding:5px 10px; color:var(--chalk-dim);">Remove</button>
+      </div>` : ''}
+    `;
+    labList.appendChild(row);
+  });
+
+  document.querySelectorAll('.labGradeWin').forEach(btn=>{
+    btn.addEventListener('click', ()=> gradeLabProp(btn.dataset.id, 'win'));
+  });
+  document.querySelectorAll('.labGradeLoss').forEach(btn=>{
+    btn.addEventListener('click', ()=> gradeLabProp(btn.dataset.id, 'loss'));
+  });
+  document.querySelectorAll('.labGradePush').forEach(btn=>{
+    btn.addEventListener('click', ()=> gradeLabProp(btn.dataset.id, 'push'));
+  });
+  document.querySelectorAll('.labRemove').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const props = loadLabProps().filter(p=>p.id!==btn.dataset.id);
+      saveLabProps(props);
+      renderLab();
+    });
+  });
+}
+
+function gradeLabProp(id, result){
+  const props = loadLabProps();
+  const prop = props.find(p=>p.id===id);
+  if(prop) prop.status = result;
+  saveLabProps(props);
+  renderLab();
+}
+
+function renderLabReliability(allProps){
+  const el = document.getElementById('labReliability');
+  const graded = allProps.filter(p=>p.status==='win'||p.status==='loss');
+  if(graded.length < 3){
+    el.innerHTML = '<div class="empty-state">Grade at least 3 picks to see reliability stats.</div>';
+    return;
+  }
+
+  // Build stats by prop type + by tier
+  const breakdowns = [];
+  ['HR','K','OUTS','WINNER'].forEach(type=>{
+    const byType = graded.filter(p=>p.propType===type);
+    if(!byType.length) return;
+    const wins = byType.filter(p=>p.status==='win').length;
+    breakdowns.push({ label:`${type} Props`, n:byType.length, wins, hitRate:wins/byType.length });
+  });
+  ['strong','medium','small'].forEach(tier=>{
+    const byTier = graded.filter(p=>p.tier===tier);
+    if(!byTier.length) return;
+    const wins = byTier.filter(p=>p.status==='win').length;
+    const tierLabel = tier==='strong'?'Strong Edge (>7pts)':tier==='medium'?'Medium Edge (4–7pts)':'Small Edge (1–4pts)';
+    breakdowns.push({ label:tierLabel, n:byTier.length, wins, hitRate:wins/byTier.length, tier });
+  });
+
+  // Top pick suggestion based on best edge tier with enough sample
+  const topTier = ['strong','medium','small'].find(t=> graded.filter(p=>p.tier===t).length>=5);
+  let suggestion = '';
+  if(topTier){
+    const topStats = graded.filter(p=>p.tier===topTier);
+    const topHit = topStats.filter(p=>p.status==='win').length/topStats.length;
+    if(topHit >= 0.55){
+      const bestType = ['HR','K','OUTS','WINNER'].map(type=>{
+        const s = topStats.filter(p=>p.propType===type);
+        if(!s.length) return null;
+        return { type, hit:s.filter(p=>p.status==='win').length/s.length, n:s.length };
+      }).filter(Boolean).sort((a,b)=>b.hit-a.hit)[0];
+      if(bestType && bestType.hit >= 0.55){
+        suggestion = `<div class="best-bet-card" style="margin-bottom:10px;">
+          <div class="best-bet-label">📊 Model's Strongest Track Record</div>
+          <div class="best-bet-name">${bestType.type} Props · ${edgeTierLabel(topTier).label}</div>
+          <div class="best-bet-meta">${pct(bestType.hit)} hit rate over ${bestType.n} graded picks — stick to this edge tier and prop type</div>
+        </div>`;
+      }
+    }
+  }
+
+  el.innerHTML = suggestion + breakdowns.map(b=>{
+    const color = b.hitRate >= 0.6 ? '#7CC68A' : b.hitRate >= 0.5 ? 'var(--mustard)' : 'var(--cold)';
+    return `
+      <div class="reliability-card">
+        <div class="reliability-header">
+          <div class="reliability-title">${b.label}</div>
+          <div class="reliability-pct" style="color:${color};">${pct(b.hitRate)}</div>
+        </div>
+        <div class="reliability-bar-track">
+          <div class="reliability-bar-fill" style="width:${Math.round(b.hitRate*100)}%; background:${color};"></div>
+        </div>
+        <div class="reliability-detail">${b.wins}W–${b.n-b.wins}L (${b.n} graded) · ${b.hitRate>=0.55?'✅ Track record supports betting this':'⚠️ Need more sample or re-evaluate model'}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function wireLabFilters(){
+  document.querySelectorAll('.lab-filter-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.lab-filter-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      labFilter = btn.dataset.filter;
+      renderLab();
+    });
+  });
+}
+
 function wireTabs(){
   document.querySelectorAll('.tab-btn').forEach(btn=>{
     if(btn.disabled) return;
     btn.addEventListener('click', ()=>{
       document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
-      ['hr','ks','outs','winners','parlay','tracking'].forEach(t=>{
-        document.getElementById('tab-'+t).style.display = (t === btn.dataset.tab) ? 'block' : 'none';
+      ['hr','ks','outs','winners','parlay','lab','tracking'].forEach(t=>{
+        const el = document.getElementById('tab-'+t);
+        if(el) el.style.display = (t === btn.dataset.tab) ? 'block' : 'none';
       });
       if(btn.dataset.tab === 'tracking') renderPicks();
       if(btn.dataset.tab === 'parlay') renderParlay();
+      if(btn.dataset.tab === 'lab') renderLab();
     });
   });
 }
@@ -2079,6 +2452,8 @@ function init(){
   loadSchedule(state.date);
   renderPicks();
   renderParlay();
+  wireLabFilters();
+  renderLab();
 }
 
 init();
