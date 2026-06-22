@@ -468,17 +468,58 @@
 
   <!-- ============ PARLAY TAB ============ -->
   <div id="tab-parlay" style="display:none;">
+
     <div class="panel">
-      <div class="panel-title">Parlay Builder</div>
-      <div class="panel-desc">Combines whatever you've added from HR Props, K's, Outs, and Winners. Combined probability assumes each leg is independent — same-game legs are usually correlated in reality (e.g. a team winning big and their hitters going over HR props), so treat the combined number as optimistic, not exact.</div>
-      <div id="parlayLegs"><div class="empty-state">No legs yet. Hit "Add to Parlay" from any readout.</div></div>
-      <div class="parlay-summary" id="parlaySummary" style="display:none;">
-        <div>Legs<b id="parlayLegCount">0</b></div>
-        <div>Combined Probability<b id="parlayCombinedProb">--</b></div>
-        <div>Combined Payout<b id="parlayCombinedPayout">--</b></div>
+      <div class="panel-title">Auto Build</div>
+      <div class="panel-desc">Picks the best leg from each prop type using edge (if live lines are loaded) or raw model probability, then assembles the cleanest parlay it can. Run the Auto Scans first on each tab for the most accurate pool of candidates.</div>
+
+      <div class="two-col" style="margin-bottom:10px;">
+        <div class="field-row">
+          <label>Legs to include</label>
+          <select id="parlayLegCount">
+            <option value="2">2-leg</option>
+            <option value="3" selected>3-leg</option>
+            <option value="4">4-leg</option>
+            <option value="5">5-leg</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Prefer</label>
+          <select id="parlayPrefer">
+            <option value="edge">Highest edge (needs live lines)</option>
+            <option value="prob">Highest model probability</option>
+          </select>
+        </div>
       </div>
-      <button id="parlayClearBtn" class="ghost" style="width:100%; margin-top:10px;">Clear Parlay</button>
+
+      <div class="toggle-row" style="margin-bottom:10px;">
+        <input type="checkbox" id="parlayDiffGames" checked>
+        <label for="parlayDiffGames" style="margin:0; text-transform:none; font-family:var(--body); color:var(--chalk-dim);">Prefer different games per leg (reduces correlation)</label>
+      </div>
+
+      <button class="primary" id="parlayAutoBuildBtn" style="width:100%;">Build Best Parlay</button>
+      <div class="progress-text" id="parlayBuildStatus"></div>
     </div>
+
+    <div class="panel" id="parlayResultPanel" style="display:none;">
+      <div class="panel-title">Generated Parlay <small id="parlayGeneratedLabel"></small></div>
+      <div id="parlayLegs"><div class="empty-state">Hit Build above.</div></div>
+      <div class="parlay-summary" id="parlaySummary" style="display:none;">
+        <div>Legs<b id="parlayLegCountDisplay">0</b></div>
+        <div>Combined Prob<b id="parlayCombinedProb">--</b></div>
+        <div>Payout<b id="parlayCombinedPayout">--</b></div>
+      </div>
+      <div class="two-col" style="margin-top:10px;">
+        <button id="parlaySaveBtn">Save All to Tracking</button>
+        <button id="parlayClearBtn" class="ghost">Clear</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Manual Legs <small>from "Add to Parlay" buttons</small></div>
+      <div id="parlayManualLegs"><div class="empty-state">Nothing added manually yet.</div></div>
+    </div>
+
   </div>
 
   <!-- ============ PROPS LAB TAB ============ -->
@@ -1798,6 +1839,8 @@ async function runWinCalculation(){
   }
 
   window.__lastWinCalc = { awayAbbr:r.awayAbbr, homeAbbr:r.homeAbbr, awayProb:r.awayProb, homeProb:r.homeProb, gamePk: r.gamePk, date: state.date, awayOddsRow, homeOddsRow };
+  if(!state.__winCache) state.__winCache = {};
+  state.__winCache[r.gamePk] = r;
 }
 
 async function runWinAutoScan(){
@@ -1809,7 +1852,10 @@ async function runWinAutoScan(){
   progressEl.textContent = `Scanning 0 / ${state.games.length} games…`;
 
   const allResults = await runChunked(state.games, async (g)=>{
-    return await computeWinProbForGame(g);
+    const r = await computeWinProbForGame(g);
+    if(!state.__winCache) state.__winCache = {};
+    if(r) state.__winCache[r.gamePk] = r;
+    return r;
   }, 4, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
 
   allResults.sort((a,b)=> Math.max(b.homeProb,b.awayProb) - Math.max(a.homeProb,a.awayProb));
@@ -2002,31 +2048,233 @@ async function gradePick(id){
    PARLAY BUILDER
    ========================================================================= */
 const PARLAY_KEY = 'mlb_parlay_legs';
+const PARLAY_GEN_KEY = 'mlb_parlay_generated';
+
 function loadParlayLegs(){ try{ return JSON.parse(localStorage.getItem(PARLAY_KEY) || '[]'); }catch(e){ return []; } }
 function saveParlayLegs(legs){ localStorage.setItem(PARLAY_KEY, JSON.stringify(legs)); }
+function loadGeneratedParlay(){ try{ return JSON.parse(localStorage.getItem(PARLAY_GEN_KEY) || '[]'); }catch(e){ return []; } }
+function saveGeneratedParlay(legs){ localStorage.setItem(PARLAY_GEN_KEY, JSON.stringify(legs)); }
 
 function addToParlay(leg){
   const legs = loadParlayLegs();
   legs.push(Object.assign({ id:newId() }, leg));
   saveParlayLegs(legs);
   renderParlay();
-  alert('Added to parlay.');
 }
 function removeFromParlay(id){
   const legs = loadParlayLegs().filter(l=>l.id!==id);
   saveParlayLegs(legs);
   renderParlay();
 }
+function removeFromGenerated(id){
+  const legs = loadGeneratedParlay().filter(l=>l.id!==id);
+  saveGeneratedParlay(legs);
+  renderParlay();
+}
 
-function renderParlay(){
-  const legs = loadParlayLegs();
-  const wrap = document.getElementById('parlayLegs');
-  const summary = document.getElementById('parlaySummary');
-  if(!legs.length){
-    wrap.innerHTML = '<div class="empty-state">No legs yet. Hit "Add to Parlay" from any readout.</div>';
-    summary.style.display = 'none';
+/* -------- Candidate pool: pull from every auto-scan leaderboard cache -------- */
+function buildCandidatePool(){
+  const pool = [];
+
+  // HR candidates: from battingStatsCache — everything we've scanned
+  Object.entries(state.battingStatsCache).forEach(([id, stats])=>{
+    if(stats.seasonPA < 20) return;
+    const oddsRow = Object.values(state.liveOdds[PROP_MARKET.HR] || []).find
+      ? (state.liveOdds[PROP_MARKET.HR]||[]).find(r=>r.player_name && r.player_name.includes && stats._name && r.player_name===stats._name)
+      : null;
+    // Skip if no _name cached — we'll rely on prop lab and leaderboard caches instead
+  });
+
+  // Pull from Props Lab captured props (our richest source — has prob, edge, name)
+  const labProps = loadLabProps().filter(p=>p.status==='pending' && p.date===state.date);
+  labProps.forEach(p=>{
+    pool.push({
+      id: p.id,
+      propType: p.propType,
+      subject: p.subject,
+      detail: p.detail,
+      matchup: p.matchup,
+      probability: p.modelProb,
+      impliedProb: p.impliedProb,
+      edge: p.edge,
+      oddsAmerican: p.oddsAmerican,
+      gamePk: p.gamePk || null,
+      source: 'lab'
+    });
+  });
+
+  // Also scan current liveOdds directly for any prop we have a model calc for
+  [PROP_MARKET.HR, PROP_MARKET.K, PROP_MARKET.OUTS].forEach(market=>{
+    const propType = market===PROP_MARKET.HR?'HR':market===PROP_MARKET.K?'K':'OUTS';
+    const rows = state.liveOdds[market]||[];
+    rows.filter(r=>r.is_main_line).forEach(row=>{
+      const modelProb = getModelProbForRow(propType, row);
+      if(modelProb===null) return;
+      const edge = modelProb - row.odds_probability;
+      if(edge < 0.01) return;
+      const key = `${propType}_${row.player_name}_${row.selection_type}_${row.line}`;
+      if(pool.find(p=>p.subject===row.player_name && p.propType===propType)) return; // already from lab
+      pool.push({
+        id: newId(), propType, subject: row.player_name||row.selection,
+        detail: `${row.selection_type==='over'?'Over':row.selection_type==='under'?'Under':row.selection_type} ${row.line!=null?row.line:''} · ${row.market_type}`,
+        matchup: `${row.away_team||'?'} @ ${row.home_team||'?'}`,
+        probability: modelProb, impliedProb: row.odds_probability, edge,
+        oddsAmerican: row.odds_american, gamePk: null, source: 'odds'
+      });
+    });
+  });
+
+  // Winners
+  const mlRows = state.liveOdds['moneyline']||[];
+  state.games.forEach(g=>{
+    const r = state.__winCache && state.__winCache[g.gamePk];
+    if(!r) return;
+    ['away','home'].forEach(side=>{
+      const prob = side==='away'?r.awayProb:r.homeProb;
+      const name = side==='away'?r.awayName:r.homeName;
+      const abbr = side==='away'?r.awayAbbr:r.homeAbbr;
+      const oddsRow = findMoneylineOddsForTeam(mlRows, name);
+      const implied = oddsRow ? oddsRow.odds_probability : null;
+      if(!implied) return;
+      const edge = prob - implied;
+      if(edge < 0.01) return;
+      if(pool.find(p=>p.subject===`${abbr} ML`)) return;
+      pool.push({
+        id:newId(), propType:'WINNER', subject:`${abbr} ML`,
+        detail:`${r.awayAbbr} @ ${r.homeAbbr}`, matchup:`${r.awayAbbr} @ ${r.homeAbbr}`,
+        probability:prob, impliedProb:implied, edge,
+        oddsAmerican: oddsRow.odds_american, gamePk: g.gamePk, source:'calc'
+      });
+    });
+  });
+
+  return pool;
+}
+
+function autoBuiltParlay(){
+  const numLegs = parseInt(document.getElementById('parlayLegCount').value || 3);
+  const prefer = document.getElementById('parlayPrefer').value;
+  const diffGames = document.getElementById('parlayDiffGames').checked;
+  const statusEl = document.getElementById('parlayBuildStatus');
+
+  const pool = buildCandidatePool();
+  if(!pool.length){
+    statusEl.textContent = 'No candidates yet — run Scan Today\'s Slate on each tab and load live lines first.';
     return;
   }
+
+  // Sort by edge or probability
+  const sorted = [...pool].sort((a,b)=> prefer==='edge' ? b.edge-a.edge : b.probability-a.probability);
+
+  // Greedily pick legs, optionally avoiding same-game duplicates
+  const selected = [];
+  const usedGames = new Set();
+  const usedTypes = new Set();
+
+  // First pass: prioritize variety — one per type if possible
+  for(const c of sorted){
+    if(selected.length >= numLegs) break;
+    if(diffGames && c.gamePk && usedGames.has(c.gamePk)) continue;
+    selected.push(c);
+    if(c.gamePk) usedGames.add(c.gamePk);
+    usedTypes.add(c.propType);
+  }
+
+  // Backfill if we couldn't fill legs with diversity constraint
+  if(selected.length < numLegs){
+    for(const c of sorted){
+      if(selected.length >= numLegs) break;
+      if(selected.find(s=>s.id===c.id)) continue;
+      selected.push(c);
+    }
+  }
+
+  if(!selected.length){
+    statusEl.textContent = 'Could not build a parlay — run the scans and load live lines first.';
+    return;
+  }
+
+  const legs = selected.map(c=>({...c, id:newId()}));
+  saveGeneratedParlay(legs);
+  document.getElementById('parlayBuildStatus').textContent = `Built from ${pool.length} candidates using ${prefer==='edge'?'highest edge':'highest model probability'}.`;
+  renderParlay();
+}
+
+function renderParlayLegsBlock(legs, containerId, removeFunc, labelId){
+  const wrap = document.getElementById(containerId);
+  if(!legs.length){
+    wrap.innerHTML = '<div class="empty-state">No legs yet.</div>';
+    if(labelId) document.getElementById(labelId) && (document.getElementById(labelId).textContent = '');
+    return;
+  }
+  wrap.innerHTML = '';
+  legs.forEach(l=>{
+    const row = document.createElement('div');
+    row.className = 'parlay-leg-row';
+    const hasEdge = l.edge!=null && l.edge>0;
+    row.innerHTML = `
+      <div class="parlay-leg-main">
+        <div class="parlay-leg-name"><span class="type-chip">${l.propType}</span>${l.subject}</div>
+        <div class="parlay-leg-meta">${l.detail} · ${l.matchup}</div>
+        <div class="parlay-leg-meta" style="margin-top:3px;">
+          Model ${pct(l.probability)}
+          ${l.oddsAmerican!=null ? ` · ${l.oddsAmerican>0?'+':''}${l.oddsAmerican}` : ''}
+          ${hasEdge ? ` · <span style="color:var(--clay-2);">+${(l.edge*100).toFixed(1)}pt edge</span>` : ''}
+        </div>
+      </div>
+      <button data-id="${l.id}" class="${removeFunc}Btn" style="flex-shrink:0;">×</button>
+    `;
+    wrap.appendChild(row);
+  });
+  document.querySelectorAll(`.${removeFunc}Btn`).forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      removeFunc==='parlayRemove' ? removeFromParlay(btn.dataset.id) : removeFromGenerated(btn.dataset.id);
+    });
+  });
+}
+
+function renderParlayMath(legs, probId, payoutId, summaryId){
+  const summary = document.getElementById(summaryId);
+  if(!legs.length){ if(summary) summary.style.display='none'; return; }
+  const combinedProb = legs.reduce((p,l)=>p*l.probability, 1);
+  if(probId) document.getElementById(probId).textContent = pct(combinedProb);
+  const haveOdds = legs.every(l=>l.oddsAmerican!=null);
+  if(payoutId){
+    if(haveOdds){
+      const dec = legs.reduce((p,l)=>p*americanToDecimal(l.oddsAmerican), 1);
+      const out = decimalToAmerican(dec);
+      document.getElementById(payoutId).textContent = `${out>0?'+':''}${out}`;
+    } else {
+      document.getElementById(payoutId).textContent = 'Load lines for payout';
+    }
+  }
+  if(summary) summary.style.display = 'flex';
+}
+
+function renderParlay(){
+  const genLegs = loadGeneratedParlay();
+  const manLegs = loadParlayLegs();
+
+  const resultPanel = document.getElementById('parlayResultPanel');
+  if(genLegs.length){
+    resultPanel.style.display = 'block';
+    const prefer = document.getElementById('parlayPrefer') ? document.getElementById('parlayPrefer').value : 'edge';
+    const labelEl = document.getElementById('parlayGeneratedLabel');
+    if(labelEl) labelEl.textContent = `${genLegs.length} legs · sorted by ${prefer==='edge'?'edge':'probability'}`;
+    renderParlayLegsBlock(genLegs, 'parlayLegs', 'parlayGenRemove', null);
+    renderParlayMath(genLegs, 'parlayCombinedProb', 'parlayCombinedPayout', 'parlaySummary');
+    document.getElementById('parlayLegCountDisplay').textContent = genLegs.length;
+  } else {
+    resultPanel.style.display = 'none';
+  }
+
+  // Manual legs
+  renderParlayManualLegs(manLegs);
+}
+
+function renderParlayManualLegs(legs){
+  const wrap = document.getElementById('parlayManualLegs');
+  if(!legs.length){ wrap.innerHTML = '<div class="empty-state">Nothing added manually yet — use "Add to Parlay" buttons on any readout.</div>'; return; }
   wrap.innerHTML = '';
   legs.forEach(l=>{
     const row = document.createElement('div');
@@ -2034,35 +2282,38 @@ function renderParlay(){
     row.innerHTML = `
       <div class="parlay-leg-main">
         <div class="parlay-leg-name"><span class="type-chip">${l.propType}</span>${l.subject}</div>
-        <div class="parlay-leg-meta">${l.detail} · model ${pct(l.probability)}${l.oddsAmerican!=null ? ` · ${l.oddsAmerican>0?'+':''}${l.oddsAmerican}` : ''}</div>
+        <div class="parlay-leg-meta">${l.detail} · model ${pct(l.probability)}${l.oddsAmerican!=null?` · ${l.oddsAmerican>0?'+':''}${l.oddsAmerican}`:''}</div>
       </div>
-      <button data-id="${l.id}" class="parlayRemoveBtn">Remove</button>
+      <button data-id="${l.id}" class="parlayRemoveBtn" style="flex-shrink:0;">×</button>
     `;
     wrap.appendChild(row);
   });
   document.querySelectorAll('.parlayRemoveBtn').forEach(btn=>{
     btn.addEventListener('click', ()=> removeFromParlay(btn.dataset.id));
   });
-
-  const combinedProb = legs.reduce((p,l)=> p*l.probability, 1);
-  document.getElementById('parlayLegCount').textContent = legs.length;
-  document.getElementById('parlayCombinedProb').textContent = pct(combinedProb);
-
-  const haveAllOdds = legs.every(l=>l.oddsAmerican!=null);
-  if(haveAllOdds){
-    const combinedDecimal = legs.reduce((p,l)=> p*americanToDecimal(l.oddsAmerican), 1);
-    const americanOut = decimalToAmerican(combinedDecimal);
-    document.getElementById('parlayCombinedPayout').textContent = `${americanOut>0?'+':''}${americanOut}`;
-  } else {
-    document.getElementById('parlayCombinedPayout').textContent = 'Missing odds on some legs';
-  }
-  summary.style.display = 'flex';
 }
 
 function clearParlay(){
-  saveParlayLegs([]);
+  saveGeneratedParlay([]);
   renderParlay();
 }
+
+function saveGeneratedToTracking(){
+  const legs = loadGeneratedParlay();
+  if(!legs.length){ alert('No generated parlay to save.'); return; }
+  const picks = loadPicks();
+  legs.forEach(l=>{
+    picks.unshift({
+      id:newId(), propType:l.propType, date:state.date, gamePk:l.gamePk||null,
+      subject:l.subject, detail:l.detail, probability:l.probability,
+      line:l.line||null, side:l.side||null, tag:`Parlay · ${pct(l.probability)}`, status:'pending'
+    });
+  });
+  savePicks(picks);
+  renderPicks();
+  alert(`${legs.length} legs saved to Tracking.`);
+}
+
 
 /* =========================================================================
    BEST BET CALLOUTS (shown above each Auto Scan leaderboard once live lines
@@ -2446,8 +2697,10 @@ function init(){
     });
   });
   document.getElementById('parlayClearBtn').addEventListener('click', ()=>{
-    if(confirm('Clear all parlay legs?')) clearParlay();
+    if(confirm('Clear generated parlay?')) clearParlay();
   });
+  document.getElementById('parlayAutoBuildBtn').addEventListener('click', autoBuiltParlay);
+  document.getElementById('parlaySaveBtn').addEventListener('click', saveGeneratedToTracking);
 
   loadSchedule(state.date);
   renderPicks();
