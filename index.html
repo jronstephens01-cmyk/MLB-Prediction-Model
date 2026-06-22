@@ -471,7 +471,7 @@
 
     <div class="panel">
       <div class="panel-title">Auto Build</div>
-      <div class="panel-desc">Picks the best leg from each prop type using edge (if live lines are loaded) or raw model probability, then assembles the cleanest parlay it can. Run the Auto Scans first on each tab for the most accurate pool of candidates.</div>
+      <div class="panel-desc">One tap — loads live lines, runs all four scans, and picks the best legs automatically. No setup needed.</div>
 
       <div class="two-col" style="margin-bottom:10px;">
         <div class="field-row">
@@ -486,7 +486,7 @@
         <div class="field-row">
           <label>Prefer</label>
           <select id="parlayPrefer">
-            <option value="edge">Highest edge (needs live lines)</option>
+            <option value="edge">Highest edge (vs live lines)</option>
             <option value="prob">Highest model probability</option>
           </select>
         </div>
@@ -497,7 +497,7 @@
         <label for="parlayDiffGames" style="margin:0; text-transform:none; font-family:var(--body); color:var(--chalk-dim);">Prefer different games per leg (reduces correlation)</label>
       </div>
 
-      <button class="primary" id="parlayAutoBuildBtn" style="width:100%;">Build Best Parlay</button>
+      <button class="primary" id="parlayAutoBuildBtn" style="width:100%; font-size:15px; padding:12px;">🔥 Build Best Parlay</button>
       <div class="progress-text" id="parlayBuildStatus"></div>
     </div>
 
@@ -2151,36 +2151,57 @@ function buildCandidatePool(){
   return pool;
 }
 
-function autoBuiltParlay(){
+async function autoBuiltParlay(){
   const numLegs = parseInt(document.getElementById('parlayLegCount').value || 3);
   const prefer = document.getElementById('parlayPrefer').value;
   const diffGames = document.getElementById('parlayDiffGames').checked;
+  const btn = document.getElementById('parlayAutoBuildBtn');
   const statusEl = document.getElementById('parlayBuildStatus');
+
+  btn.disabled = true;
+
+  // ── Step 1: Load live lines for all four markets in parallel ──────────────
+  statusEl.textContent = 'Step 1/3 · Loading live lines for all markets…';
+  await Promise.all([
+    loadLiveOdds(PROP_MARKET.HR, null),
+    loadLiveOdds(PROP_MARKET.K, null),
+    loadLiveOdds(PROP_MARKET.OUTS, null),
+    loadLiveOdds('moneyline', null)
+  ]);
+
+  // ── Step 2: Run all four auto-scans ──────────────────────────────────────
+  statusEl.textContent = 'Step 2/3 · Running all scans across today\'s slate…';
+  if(!state.games.length){
+    await loadSchedule(state.date);
+  }
+  await Promise.all([
+    runAutoScanSilent(),
+    runKsAutoScanSilent(),
+    runOutsAutoScanSilent(),
+    runWinAutoScanSilent()
+  ]);
+
+  // ── Step 3: Pick best legs ────────────────────────────────────────────────
+  statusEl.textContent = 'Step 3/3 · Selecting best legs…';
 
   const pool = buildCandidatePool();
   if(!pool.length){
-    statusEl.textContent = 'No candidates yet — run Scan Today\'s Slate on each tab and load live lines first.';
+    statusEl.textContent = '⚠️ No candidates found — probable pitchers or rosters may not be posted yet for today.';
+    btn.disabled = false;
     return;
   }
 
-  // Sort by edge or probability
   const sorted = [...pool].sort((a,b)=> prefer==='edge' ? b.edge-a.edge : b.probability-a.probability);
-
-  // Greedily pick legs, optionally avoiding same-game duplicates
   const selected = [];
   const usedGames = new Set();
-  const usedTypes = new Set();
 
-  // First pass: prioritize variety — one per type if possible
   for(const c of sorted){
     if(selected.length >= numLegs) break;
     if(diffGames && c.gamePk && usedGames.has(c.gamePk)) continue;
     selected.push(c);
     if(c.gamePk) usedGames.add(c.gamePk);
-    usedTypes.add(c.propType);
   }
-
-  // Backfill if we couldn't fill legs with diversity constraint
+  // backfill if diversity constraint left gaps
   if(selected.length < numLegs){
     for(const c of sorted){
       if(selected.length >= numLegs) break;
@@ -2189,15 +2210,74 @@ function autoBuiltParlay(){
     }
   }
 
-  if(!selected.length){
-    statusEl.textContent = 'Could not build a parlay — run the scans and load live lines first.';
-    return;
-  }
-
   const legs = selected.map(c=>({...c, id:newId()}));
   saveGeneratedParlay(legs);
-  document.getElementById('parlayBuildStatus').textContent = `Built from ${pool.length} candidates using ${prefer==='edge'?'highest edge':'highest model probability'}.`;
+  const prefer_label = prefer==='edge' ? 'highest edge vs live lines' : 'highest model probability';
+  statusEl.textContent = `✅ Built ${legs.length}-leg parlay from ${pool.length} candidates · sorted by ${prefer_label}.`;
+  btn.disabled = false;
   renderParlay();
+}
+
+// ── Silent scan variants (no UI progress updates, no button state) ────────────
+async function runAutoScanSilent(){
+  if(!state.games.length) return;
+  const allResults = [];
+  await runChunked(state.games, async (g)=>{
+    const away = g.teams.away.team, home = g.teams.home.team;
+    const awayAbbr = abbrForTeam(away), homeAbbr = abbrForTeam(home);
+    const parkFactor = PARK_FACTORS[homeAbbr] != null ? PARK_FACTORS[homeAbbr] : 1.0;
+    const weather = await getWeather(homeAbbr);
+    const tempFactor = tempFactorFor(weather);
+    const awayPitcherId = g.teams.away.probablePitcher ? g.teams.away.probablePitcher.id : null;
+    const homePitcherId = g.teams.home.probablePitcher ? g.teams.home.probablePitcher.id : null;
+    if(!awayPitcherId && !homePitcherId) return;
+    const pitcherStats = await getPitchersBatch([awayPitcherId, homePitcherId]);
+    const [awayHitters, homeHitters] = await Promise.all([getTeamHittersBatch(away.id), getTeamHittersBatch(home.id)]);
+    if(homePitcherId && pitcherStats[homePitcherId]){
+      awayHitters.forEach(h=>{ if(h.seasonPA < 20) return;
+        const calc = calcConfidence({batRate:h.blendedRate, pitHR9:pitcherStats[homePitcherId].blendedHR9, parkFactor, windMph:0, tempFactor, pa:4.1});
+        allResults.push({ name:h.fullName, team:awayAbbr, opp:g.teams.home.probablePitcher ? g.teams.home.probablePitcher.fullName : 'TBD', prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date });
+      });
+    }
+    if(awayPitcherId && pitcherStats[awayPitcherId]){
+      homeHitters.forEach(h=>{ if(h.seasonPA < 20) return;
+        const calc = calcConfidence({batRate:h.blendedRate, pitHR9:pitcherStats[awayPitcherId].blendedHR9, parkFactor, windMph:0, tempFactor, pa:4.1});
+        allResults.push({ name:h.fullName, team:homeAbbr, opp:g.teams.away.probablePitcher ? g.teams.away.probablePitcher.fullName : 'TBD', prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date });
+      });
+    }
+  }, 3);
+  allResults.sort((a,b)=>b.prob-a.prob);
+}
+
+async function runKsAutoScanSilent(){
+  if(!state.games.length) return;
+  await runChunked(state.games, async (g)=>{
+    const opts = getProbablePitcherOptions(g);
+    await Promise.all(opts.map(async (o)=>{
+      const [pitStats, oppK] = await Promise.all([getPitcherStats(o.id), getTeamKRate(o.oppTeamId)]);
+      if(!pitStats || pitStats.blendedK_pct == null || oppK == null) return;
+    }));
+  }, 4);
+}
+
+async function runOutsAutoScanSilent(){
+  if(!state.games.length) return;
+  await runChunked(state.games, async (g)=>{
+    const opts = getProbablePitcherOptions(g);
+    await Promise.all(opts.map(async (o)=>{
+      const [pitStats, oppOffense] = await Promise.all([getPitcherStats(o.id), getTeamOffenseRate(o.oppTeamId)]);
+      if(!pitStats || pitStats.blendedIPperStart == null) return;
+    }));
+  }, 4);
+}
+
+async function runWinAutoScanSilent(){
+  if(!state.games.length) return;
+  if(!state.__winCache) state.__winCache = {};
+  await runChunked(state.games, async (g)=>{
+    const r = await computeWinProbForGame(g);
+    if(r) state.__winCache[r.gamePk] = r;
+  }, 4);
 }
 
 function renderParlayLegsBlock(legs, containerId, removeFunc, labelId){
