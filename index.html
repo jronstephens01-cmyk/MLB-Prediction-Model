@@ -316,7 +316,7 @@
         <div class="readout-tag" id="readoutTag">—</div>
 
         <div class="stat-grid">
-          <div class="stat-box"><div class="k">Batter Rate (blended)</div><div class="v" id="outBatRate">--</div></div>
+          <div class="stat-box"><div class="k">Batter HR Rate</div><div class="v" id="outBatRate">--</div></div>
           <div class="stat-box"><div class="k">vs League Avg</div><div class="v" id="outBatRel">--</div></div>
           <div class="stat-box"><div class="k">Pitcher HR/9 (blended)</div><div class="v" id="outPitHR9">--</div></div>
           <div class="stat-box"><div class="k">vs League Avg</div><div class="v" id="outPitRel">--</div></div>
@@ -324,6 +324,10 @@
           <div class="stat-box"><div class="k">Temp Adj.</div><div class="v" id="outTemp">--</div></div>
           <div class="stat-box"><div class="k">Wind Adj.</div><div class="v" id="outWind">--</div></div>
           <div class="stat-box"><div class="k">Recent Form</div><div class="v" id="outRecent">--</div></div>
+          <div class="stat-box" style="grid-column:1/-1;"><div class="k">Platoon (vs pitcher hand)</div><div class="v" id="outPlatoon" style="font-size:12px;">--</div></div>
+          <div class="stat-box" style="grid-column:1/-1;"><div class="k">Statcast Quality Adj.</div><div class="v" id="outStatcast" style="font-size:12px;">--</div></div>
+          <div class="stat-box" style="grid-column:1/-1;"><div class="k">Pitcher FB Rate Adj.</div><div class="v" id="outFBRate" style="font-size:12px;">--</div></div>
+          <div class="stat-box"><div class="k">Proj. PA (lineup)</div><div class="v" id="outPA">--</div></div>
         </div>
         <div id="hrEdgeBlock"></div>
       </div>
@@ -702,22 +706,32 @@ const VENUE_COORDS = {
 // auto-apply wind/temp effects for these parks.
 const ROOF_STATUS = { TB:'fixed', TOR:'retractable', ARI:'retractable', HOU:'retractable', MIL:'retractable', TEX:'retractable', SEA:'retractable', MIA:'retractable' };
 
-const LEAGUE_AVG_HR_RATE = 0.031; // ~ HR per PA, league-wide approx
-const LEAGUE_AVG_HR9 = 1.25;      // ~ pitcher HR allowed per 9 IP, league-wide approx
-const LEAGUE_AVG_K_PCT = 0.225;   // ~ league strikeout rate per batter faced, approx
-const LEAGUE_AVG_ERA = 4.00;      // ~ league average ERA, approx
-const LEAGUE_AVG_RUNS_PER_GAME = 4.3; // ~ league average team runs/game, approx
-const HOME_FIELD_EDGE = 0.03;     // flat home-field win probability boost
-const OUTS_SD = 4.2;              // assumed std-dev (in outs) for the outs-recorded normal approximation
+const LEAGUE_AVG_HR_RATE = 0.031;
+const LEAGUE_AVG_HR9 = 1.25;
+const LEAGUE_AVG_K_PCT = 0.225;
+const LEAGUE_AVG_ERA = 4.00;
+const LEAGUE_AVG_RUNS_PER_GAME = 4.3;
+const HOME_FIELD_EDGE = 0.03;
+const OUTS_SD = 4.2;
 const RECENT_GAMES_BATTER = 15;
 const RECENT_STARTS_PITCHER = 5;
-const RECENT_BLEND_WEIGHT = 0.5;  // how much weight recent form gets vs season, when sample is big enough
+const RECENT_BLEND_WEIGHT = 0.5;
 
+// Statcast league averages (2024–2025 blended baselines)
+const LEAGUE_AVG_BARREL_RATE = 0.072;   // barrel% — batted balls squared up at 98+ mph / ideal launch
+const LEAGUE_AVG_HARD_HIT = 0.375;      // hard-hit% — 95+ mph exit velocity
+const LEAGUE_AVG_EXIT_VELO = 88.5;      // avg exit velocity mph
+const LEAGUE_AVG_PIT_FB_RATE = 0.36;    // pitcher fly ball rate (air outs / total outs)
+
+// PA estimate by batting order position (1=leadoff, 9=last)
+const PA_BY_ORDER = [4.65, 4.5, 4.4, 4.3, 4.2, 4.1, 4.0, 3.9, 3.75];
+
+const SAVANT_PROXY  = 'https://mlb-odds-proxy.jronstephens01.workers.dev/savant';
 const API = "https://statsapi.mlb.com/api/v1";
 const WEATHER_API = "https://api.open-meteo.com/v1/forecast";
 const ODDS_PROXY = "https://mlb-odds-proxy.jronstephens01.workers.dev/odds/api/v1";
 const PROP_MARKET = { HR:'player_home_runs', K:'player_strikeouts', OUTS:'player_pitching_outs' };
-const EDGE_TAKE_THRESHOLD = 0.03;  // model prob vs sportsbook implied prob, in absolute probability points
+const EDGE_TAKE_THRESHOLD = 0.03;
 
 /* =========================================================================
    STATE
@@ -733,7 +747,13 @@ let state = {
   teamKRateCache: {},
   teamOffenseCache: {},
   standings: null,
-  liveOdds: {}   // marketSlug -> flat array of odds rows from SharpAPI
+  liveOdds: {},
+  statcastBatters: {},   // mlbamId -> {barrelRate, hardHitPct, exitVelo}
+  statcastPitchers: {},  // mlbamId -> {barrelPctAllowed, hardHitPct}
+  statcastLoaded: false,
+  platoonSplits: {},     // `${personId}_vr` / `_vl` -> {hr, pa, rate}
+  lineupCache: {},       // gamePk -> [{personId, battingOrder, position}]
+  pitcherHands: {}       // personId -> 'R'|'L'
 };
 
 /* =========================================================================
@@ -1001,6 +1021,8 @@ async function getPitcherStats(personId){
   const gamesStarted = Number(seasonStat.gamesStarted || 0);
   const seasonIPperStart = gamesStarted > 0 ? seasonIP/gamesStarted : null;
   const seasonBFperStart = gamesStarted > 0 ? seasonBF/gamesStarted : null;
+  const seasonAirOuts = Number(seasonStat.airOuts || 0);
+  const seasonGroundOuts = Number(seasonStat.groundOuts || 0);
 
   const recent = logGroup ? recentSplitRate(logGroup.splits, RECENT_STARTS_PITCHER, 'pitching') : null;
 
@@ -1032,9 +1054,11 @@ async function getPitcherStats(personId){
   }
 
   const result = {
-    seasonHR9: Number(seasonHR9), seasonIP, recentHR9: recent ? recent.hr9 : null, recentIP: recent ? recent.ip : 0, blendedHR9,
+    seasonHR9: Number(seasonHR9), seasonIP, recentHR9: recent ? recent.hr9 : null,
+    recentIP: recent ? recent.ip : 0, blendedHR9,
     seasonK_pct, blendedK_pct, seasonERA, gamesStarted,
-    seasonIPperStart, blendedIPperStart, seasonBFperStart, blendedBFperStart, recentForm
+    seasonIPperStart, blendedIPperStart, seasonBFperStart, blendedBFperStart, recentForm,
+    seasonAirOuts, seasonGroundOuts
   };
   state.pitchingStatsCache[personId] = result;
   return result;
@@ -1152,11 +1176,164 @@ async function getWeather(teamAbbr){
 }
 
 function tempFactorFor(weather){
-  // Mild, direction-agnostic effect: warmer air carries fly balls a bit further.
-  // Skipped for domes/retractable parks since indoor conditions are roughly constant.
   if(!weather || weather.isDome || weather.retractable) return 1.0;
   const delta = weather.temp - 70;
   return Math.max(0.95, Math.min(1.08, 1 + delta*0.0015));
+}
+
+/* =========================================================================
+   STATCAST (Baseball Savant via Worker proxy, with direct-fetch fallback)
+   ========================================================================= */
+function parseCSVToObjects(text){
+  const lines = text.trim().split('\n');
+  if(lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h=>h.replace(/"/g,'').trim());
+  return lines.slice(1).map(line=>{
+    const vals = line.split(',').map(v=>v.replace(/"/g,'').trim());
+    const obj={};
+    headers.forEach((h,i)=>obj[h]=vals[i]);
+    return obj;
+  });
+}
+
+async function fetchStatcastCSV(type){
+  const year = seasonYear();
+  const min = type==='batter' ? 25 : 10;
+  const proxyUrl = `${SAVANT_PROXY}/leaderboard/statcast?type=${type}&year=${year}&min=${min}&csv=true`;
+  const directUrl = `https://baseballsavant.mlb.com/leaderboard/statcast?type=${type}&year=${year}&min=${min}&csv=true`;
+
+  for(const url of [proxyUrl, directUrl]){
+    try{
+      const res = await fetch(url);
+      if(!res.ok) continue;
+      const text = await res.text();
+      if(text && text.includes('player_id')){ logDebug(`Statcast ${type} OK via ${url.includes('proxy')?'proxy':'direct'}`, true); return text; }
+    }catch(e){ logDebug(`Statcast ${type} fetch failed (${url.includes('proxy')?'proxy':'direct'}): ${e.message}`, false); }
+  }
+  logDebug(`Statcast ${type}: both routes failed — add /savant/ route to Worker for best results`, false);
+  return null;
+}
+
+async function loadStatcast(){
+  if(state.statcastLoaded) return;
+  const [batText, pitText] = await Promise.all([fetchStatcastCSV('batter'), fetchStatcastCSV('pitcher')]);
+
+  if(batText){
+    const rows = parseCSVToObjects(batText);
+    rows.forEach(r=>{
+      const id = r.player_id || r.mlbam_id;
+      if(!id) return;
+      state.statcastBatters[id] = {
+        barrelRate: parseFloat(r.barrel_batted_rate || r.barrel_rate || r.brl_pa || 0) / 100 || null,
+        hardHitPct: parseFloat(r.hard_hit_percent || r.hard_hit || 0) / 100 || null,
+        exitVelo: parseFloat(r.avg_exit_velocity || r.exit_velocity_avg || 0) || null,
+        name: `${r.first_name||''} ${r.last_name||''}`.trim()
+      };
+    });
+    logDebug(`Statcast batters loaded: ${Object.keys(state.statcastBatters).length}`, true);
+  }
+
+  if(pitText){
+    const rows = parseCSVToObjects(pitText);
+    rows.forEach(r=>{
+      const id = r.player_id || r.mlbam_id;
+      if(!id) return;
+      state.statcastPitchers[id] = {
+        barrelPctAllowed: parseFloat(r.barrel_batted_rate || r.brl_pa || 0) / 100 || null,
+        hardHitPct: parseFloat(r.hard_hit_percent || 0) / 100 || null
+      };
+    });
+    logDebug(`Statcast pitchers loaded: ${Object.keys(state.statcastPitchers).length}`, true);
+  }
+  state.statcastLoaded = true;
+}
+
+function getStatcastForBatter(personId){
+  // Try direct match, then by name from our batter stats cache
+  return state.statcastBatters[String(personId)] || null;
+}
+function getStatcastForPitcher(personId){
+  return state.statcastPitchers[String(personId)] || null;
+}
+
+/* =========================================================================
+   PLATOON SPLITS (MLB Stats API — splits by vs LHP / vs RHP)
+   ========================================================================= */
+async function getPlatoonSplit(personId, pitcherHand){
+  if(!pitcherHand) return null;
+  const sitCode = pitcherHand === 'L' ? 'vl' : 'vr';
+  const cacheKey = `${personId}_${sitCode}`;
+  if(state.platoonSplits[cacheKey] !== undefined) return state.platoonSplits[cacheKey];
+
+  const url = `${API}/people/${personId}/stats?stats=statSplits&group=hitting&season=${seasonYear()}&gameType=R`;
+  const data = await safeFetchJSON(url, `platoon splits ${personId}`);
+  const splits = (data?.stats?.[0]?.splits) || [];
+
+  // Cache all available splits while we have them
+  splits.forEach(s=>{
+    const code = s.split?.code;
+    if(!code) return;
+    const st = s.stat;
+    const pa = Number(st?.plateAppearances || 0);
+    const hr = Number(st?.homeRuns || 0);
+    const key = `${personId}_${code}`;
+    state.platoonSplits[key] = pa >= 20 ? { hr, pa, rate: hr/pa } : null;
+  });
+
+  if(state.platoonSplits[cacheKey] === undefined) state.platoonSplits[cacheKey] = null;
+  return state.platoonSplits[cacheKey];
+}
+
+/* =========================================================================
+   PITCHER THROWING HAND
+   ========================================================================= */
+async function getPitcherHand(personId){
+  if(state.pitcherHands[personId]) return state.pitcherHands[personId];
+  // Try from schedule data already loaded
+  for(const g of state.games){
+    for(const side of ['away','home']){
+      const pp = g.teams[side].probablePitcher;
+      if(pp && String(pp.id) === String(personId)){
+        // Check if hand is already hydrated
+        if(pp.pitchHand) return state.pitcherHands[personId] = pp.pitchHand.code;
+      }
+    }
+  }
+  // Fetch from people endpoint
+  const data = await safeFetchJSON(`${API}/people/${personId}?hydrate=pitchHand`, `pitcher hand ${personId}`);
+  const hand = data?.people?.[0]?.pitchHand?.code || null;
+  state.pitcherHands[personId] = hand;
+  return hand;
+}
+
+/* =========================================================================
+   LINEUP / BATTING ORDER
+   ========================================================================= */
+async function loadLineup(gamePk){
+  if(state.lineupCache[gamePk]) return state.lineupCache[gamePk];
+  const url = `${API}/game/${gamePk}/boxscore`;
+  const data = await safeFetchJSON(url, `lineup ${gamePk}`);
+  if(!data){ state.lineupCache[gamePk] = {}; return {}; }
+
+  const positions = {};
+  ['away','home'].forEach(side=>{
+    const players = data.teams?.[side]?.players;
+    if(!players) return;
+    Object.values(players).forEach(pl=>{
+      const order = pl.battingOrder;
+      if(order != null && order > 0){
+        // battingOrder is 100,200,...900 in the API
+        positions[pl.person.id] = Math.round(order/100);
+      }
+    });
+  });
+  state.lineupCache[gamePk] = positions;
+  return positions;
+}
+
+function paFromBattingOrder(order){
+  if(!order || order < 1 || order > 9) return 4.1;
+  return PA_BY_ORDER[order-1];
 }
 
 /* =========================================================================
@@ -1323,14 +1500,39 @@ function decimalToAmerican(dec){
 /* =========================================================================
    CONFIDENCE CALC
    ========================================================================= */
-function calcConfidence({batRate, pitHR9, parkFactor, windMph, tempFactor, pa}){
+function calcConfidence({batRate, pitHR9, parkFactor, windMph, tempFactor, pa,
+  statcastBat=null, statcastPit=null, pitFBRate=null}){
+
   const windFactor = 1 + ((windMph||0) / 100);
   const batRel = batRate / LEAGUE_AVG_HR_RATE;
   const pitRel = pitHR9 / LEAGUE_AVG_HR9;
-  const perPA = LEAGUE_AVG_HR_RATE * batRel * pitRel * parkFactor * windFactor * (tempFactor||1);
+
+  // ── Statcast batter quality adjustment ────────────────────────────────────
+  // Barrel rate (weighted more) + hard-hit rate as a secondary signal.
+  // Clamped to ±40% so one outlier stat doesn't dominate.
+  let statcastBatAdj = 1.0;
+  if(statcastBat?.barrelRate != null && statcastBat?.hardHitPct != null){
+    const barrelAdj  = Math.pow(statcastBat.barrelRate / LEAGUE_AVG_BARREL_RATE, 0.45);
+    const hardHitAdj = Math.pow(statcastBat.hardHitPct  / LEAGUE_AVG_HARD_HIT,   0.25);
+    statcastBatAdj   = Math.max(0.60, Math.min(1.45, barrelAdj * hardHitAdj));
+  } else if(statcastBat?.barrelRate != null){
+    statcastBatAdj   = Math.max(0.65, Math.min(1.40, Math.pow(statcastBat.barrelRate / LEAGUE_AVG_BARREL_RATE, 0.45)));
+  }
+
+  // ── Pitcher fly-ball rate adjustment ──────────────────────────────────────
+  // Fly-ball pitchers structurally allow more HRs. GB pitchers suppress them.
+  let fbAdj = 1.0;
+  if(pitFBRate != null){
+    fbAdj = Math.max(0.78, Math.min(1.28, pitFBRate / LEAGUE_AVG_PIT_FB_RATE));
+  }
+
+  const perPA = LEAGUE_AVG_HR_RATE * batRel * pitRel * parkFactor
+    * windFactor * (tempFactor||1) * statcastBatAdj * fbAdj;
   const perPAClamped = Math.max(0, Math.min(perPA, 0.5));
   const gameProb = 1 - Math.pow(1 - perPAClamped, pa);
-  return { gameProb, batRel, pitRel, windFactor, perPA: perPAClamped };
+
+  return { gameProb, batRel, pitRel, windFactor, perPA:perPAClamped,
+    statcastBatAdj, fbAdj };
 }
 function tagForProb(p){
   if(p >= 0.20) return {label:'Strong', color:'var(--clay-2)'};
@@ -1346,9 +1548,11 @@ async function runCalculation(){
   const manual = document.getElementById('manualMode').checked;
   const parkFactor = parseFloat(document.getElementById('parkFactorSelect').value || 1.0);
   const windMph = parseFloat(document.getElementById('windInput').value || 0);
-  const pa = parseFloat(document.getElementById('paInput').value || 4.1);
+  let pa = parseFloat(document.getElementById('paInput').value || 4.1);
 
   let batRate, pitHR9, batterName='Batter', pitcherName='Pitcher', recentNote='Manual entry';
+  let statcastBat=null, pitFBRate=null, platoonNote='n/a', statcastNote='Not loaded';
+  let batterId=null, pitcherId=null;
 
   if(manual){
     batRate = parseFloat(document.getElementById('manBatHRrate').value);
@@ -1357,25 +1561,73 @@ async function runCalculation(){
   } else {
     const batterSelect = document.getElementById('batterSelect');
     const pitcherSelect = document.getElementById('pitcherSelect');
-    const batterId = batterSelect.value, pitcherId = pitcherSelect.value;
+    batterId = batterSelect.value; pitcherId = pitcherSelect.value;
     if(!batterId || !pitcherId){ alert('Pick a game, batter, and pitcher first — or switch on Manual Mode.'); return; }
     batterName = batterSelect.options[batterSelect.selectedIndex].textContent;
     pitcherName = pitcherSelect.options[pitcherSelect.selectedIndex].textContent;
 
-    // fetch batter + pitcher stats in PARALLEL, not sequentially
-    const [batStats, pitStats] = await Promise.all([getBatterStats(batterId), getPitcherStats(pitcherId)]);
-    if(!batStats || !pitStats){ alert('Live stats failed to load for this player. Try Manual Mode instead.'); return; }
-    batRate = batStats.blendedRate;
+    // Load Statcast (first time only)
+    if(!state.statcastLoaded){
+      document.getElementById('outRecent').textContent = 'Loading Statcast…';
+      await loadStatcast();
+    }
+
+    // Parallel: batter stats, pitcher stats, pitcher hand
+    const [batStats, pitStats, pitHand] = await Promise.all([
+      getBatterStats(batterId),
+      getPitcherStats(pitcherId),
+      getPitcherHand(pitcherId)
+    ]);
+    if(!batStats || !pitStats){ alert('Live stats failed to load. Try Manual Mode instead.'); return; }
+
+    // Platoon split — use it if we have enough sample
+    let usedPlatoon = false;
+    if(pitHand){
+      const split = await getPlatoonSplit(batterId, pitHand);
+      if(split && split.pa >= 40){
+        batRate = split.rate;
+        platoonNote = `vs ${pitHand==='L'?'LHP':'RHP'} · ${split.hr}HR/${split.pa}PA (${pct(split.rate)})`;
+        usedPlatoon = true;
+      }
+    }
+    if(!usedPlatoon){
+      batRate = batStats.blendedRate;
+      platoonNote = pitHand ? `vs ${pitHand==='L'?'LHP':'RHP'} · low sample, using season avg` : 'Pitcher hand unknown';
+    }
+
     pitHR9 = pitStats.blendedHR9;
-    recentNote = batStats.recentPA >= 30 ? `L${RECENT_GAMES_BATTER} blended (${RECENT_BLEND_WEIGHT*100}%)` : 'Season only — low recent sample';
+
+    // GB/FB rate from pitcher stats (airOuts vs groundOuts)
+    if(pitStats.seasonAirOuts != null && pitStats.seasonGroundOuts != null){
+      const totalOuts = pitStats.seasonAirOuts + pitStats.seasonGroundOuts;
+      if(totalOuts > 50) pitFBRate = pitStats.seasonAirOuts / totalOuts;
+    }
+
+    // Statcast for batter
+    statcastBat = getStatcastForBatter(batterId);
+    statcastNote = statcastBat
+      ? `Barrel ${statcastBat.barrelRate!=null?pct(statcastBat.barrelRate):'?'} · Hard-Hit ${statcastBat.hardHitPct!=null?pct(statcastBat.hardHitPct):'?'}`
+      : 'No Statcast data (add /savant/ route to Worker)';
+
+    // Batting order PA — try to load lineup
+    if(state.selectedGame){
+      const lineup = await loadLineup(state.selectedGame.gamePk);
+      const order = lineup[batterId];
+      if(order){ pa = paFromBattingOrder(order); }
+    }
+
+    recentNote = batStats.recentPA >= 30
+      ? `L${RECENT_GAMES_BATTER} blended (${RECENT_BLEND_WEIGHT*100}%)`
+      : 'Season only — low recent sample';
   }
 
   const battingSelect = document.getElementById('battingTeamSelect');
-  const teamAbbr = (battingSelect.value || '').split('|')[1] || (battingSelect.dataset.homeAbbr);
+  const teamAbbr = (battingSelect.value || '').split('|')[1] || battingSelect.dataset.homeAbbr;
   const weather = teamAbbr ? await getWeather(teamAbbr) : null;
   const tempFactor = tempFactorFor(weather);
 
-  const calc = calcConfidence({batRate, pitHR9, parkFactor, windMph, tempFactor, pa});
+  const calc = calcConfidence({batRate, pitHR9, parkFactor, windMph, tempFactor, pa,
+    statcastBat, pitFBRate});
   const tag = tagForProb(calc.gameProb);
 
   document.getElementById('resultPanel').style.display = 'block';
@@ -1396,13 +1648,26 @@ async function runCalculation(){
   document.getElementById('outWind').textContent = (windMph>=0?'+':'') + windMph + ' mph';
   document.getElementById('outRecent').textContent = recentNote;
 
+  // New factor cells
+  const scEl = document.getElementById('outStatcast');
+  const platEl = document.getElementById('outPlatoon');
+  const fbEl = document.getElementById('outFBRate');
+  const paEl = document.getElementById('outPA');
+  if(scEl) scEl.textContent = statcastBat
+    ? `${calc.statcastBatAdj.toFixed(2)}x (${statcastNote})`
+    : 'Not loaded';
+  if(platEl) platEl.textContent = platoonNote;
+  if(fbEl) fbEl.textContent = pitFBRate != null
+    ? `${pct(pitFBRate)} FB% · adj ${calc.fbAdj.toFixed(2)}x`
+    : 'n/a (using season HR/9 only)';
+  if(paEl) paEl.textContent = `${pa.toFixed(1)} PA`;
+
   const hrOddsRow = findPlayerOdds(PROP_MARKET.HR, batterName.split(' (')[0]);
   renderEdgeBlock('hrEdgeBlock', hrOddsRow, calc.gameProb);
 
   window.__lastCalc = {
-    propType: 'HR', batterName, pitcherName, gameProb: calc.gameProb, tag: tag.label,
-    gamePk: state.selectedGame ? state.selectedGame.gamePk : null, date: state.date,
-    oddsRow: hrOddsRow
+    propType:'HR', batterName, pitcherName, gameProb:calc.gameProb, tag:tag.label,
+    gamePk:state.selectedGame?state.selectedGame.gamePk:null, date:state.date, oddsRow:hrOddsRow
   };
 }
 
@@ -1427,6 +1692,12 @@ async function runAutoScan(){
   scanBtn.disabled = true;
   const progressEl = document.getElementById('scanProgress');
   document.getElementById('leaderboard').innerHTML = '';
+
+  // Load Statcast before scanning — one fetch covers the whole slate
+  if(!state.statcastLoaded){
+    progressEl.textContent = 'Loading Statcast data from Baseball Savant…';
+    await loadStatcast();
+  }
   progressEl.textContent = `Scanning 0 / ${state.games.length} games…`;
 
   const allResults = [];
@@ -1442,29 +1713,71 @@ async function runAutoScan(){
     const homePitcherId = g.teams.home.probablePitcher ? g.teams.home.probablePitcher.id : null;
     const awayPitcherName = g.teams.away.probablePitcher ? g.teams.away.probablePitcher.fullName : 'TBD';
     const homePitcherName = g.teams.home.probablePitcher ? g.teams.home.probablePitcher.fullName : 'TBD';
-    if(!awayPitcherId && !homePitcherId) return; // can't evaluate without at least one probable
+    if(!awayPitcherId && !homePitcherId) return;
 
     const pitcherStats = await getPitchersBatch([awayPitcherId, homePitcherId]);
+
+    // Pitcher hands for platoon — fetch in parallel
+    const [awayHand, homeHand] = await Promise.all([
+      awayPitcherId ? getPitcherHand(awayPitcherId) : Promise.resolve(null),
+      homePitcherId ? getPitcherHand(homePitcherId) : Promise.resolve(null)
+    ]);
+
+    // Pitcher FB rates
+    const awayPitFBRate = awayPitcherId && pitcherStats[awayPitcherId] ? (() => {
+      const s = pitcherStats[awayPitcherId];
+      if(!s.seasonAirOuts || !s.seasonGroundOuts) return null;
+      const tot = s.seasonAirOuts + s.seasonGroundOuts;
+      return tot > 50 ? s.seasonAirOuts/tot : null;
+    })() : null;
+    const homePitFBRate = homePitcherId && pitcherStats[homePitcherId] ? (() => {
+      const s = pitcherStats[homePitcherId];
+      if(!s.seasonAirOuts || !s.seasonGroundOuts) return null;
+      const tot = s.seasonAirOuts + s.seasonGroundOuts;
+      return tot > 50 ? s.seasonAirOuts/tot : null;
+    })() : null;
 
     const [awayHitters, homeHitters] = await Promise.all([
       getTeamHittersBatch(away.id),
       getTeamHittersBatch(home.id)
     ]);
 
-    // away batters face home pitcher; home batters face away pitcher
+    // Away batters face home pitcher
     if(homePitcherId && pitcherStats[homePitcherId]){
-      awayHitters.forEach(h=>{
-        if(h.seasonPA < 20) return;
-        const calc = calcConfidence({batRate:h.blendedRate, pitHR9:pitcherStats[homePitcherId].blendedHR9, parkFactor, windMph:0, tempFactor, pa:4.1});
-        allResults.push({ name:h.fullName, team:awayAbbr, opp:homePitcherName, prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date });
-      });
+      for(const h of awayHitters){
+        if(h.seasonPA < 20) continue;
+        const statcastBat = getStatcastForBatter(h.id || h.personId);
+        // Try platoon rate if we have pitcher hand and enough sample
+        let batRate = h.blendedRate;
+        if(homeHand && h.id){
+          const split = await getPlatoonSplit(h.id, homeHand);
+          if(split && split.pa >= 40) batRate = split.rate;
+        }
+        const calc = calcConfidence({
+          batRate, pitHR9:pitcherStats[homePitcherId].blendedHR9,
+          parkFactor, windMph:0, tempFactor, pa:4.1, statcastBat, pitFBRate:homePitFBRate
+        });
+        allResults.push({ name:h.fullName, id:h.id, team:awayAbbr, opp:homePitcherName,
+          prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date });
+      }
     }
+    // Home batters face away pitcher
     if(awayPitcherId && pitcherStats[awayPitcherId]){
-      homeHitters.forEach(h=>{
-        if(h.seasonPA < 20) return;
-        const calc = calcConfidence({batRate:h.blendedRate, pitHR9:pitcherStats[awayPitcherId].blendedHR9, parkFactor, windMph:0, tempFactor, pa:4.1});
-        allResults.push({ name:h.fullName, team:homeAbbr, opp:awayPitcherName, prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date });
-      });
+      for(const h of homeHitters){
+        if(h.seasonPA < 20) continue;
+        const statcastBat = getStatcastForBatter(h.id || h.personId);
+        let batRate = h.blendedRate;
+        if(awayHand && h.id){
+          const split = await getPlatoonSplit(h.id, awayHand);
+          if(split && split.pa >= 40) batRate = split.rate;
+        }
+        const calc = calcConfidence({
+          batRate, pitHR9:pitcherStats[awayPitcherId].blendedHR9,
+          parkFactor, windMph:0, tempFactor, pa:4.1, statcastBat, pitFBRate:awayPitFBRate
+        });
+        allResults.push({ name:h.fullName, id:h.id, team:homeAbbr, opp:awayPitcherName,
+          prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date });
+      }
     }
   }, 3, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
 
@@ -1475,9 +1788,8 @@ async function runAutoScan(){
     oddsRow: findPlayerOdds(PROP_MARKET.HR, r.name), gamePk:r.gamePk
   }));
   renderBestBet('hrBestBet', hrCandidates);
-  const hrLogged = logOfferedProps('HR', hrCandidates, null);
-  if(hrLogged) logDebug(`Logged ${hrLogged} HR props to Reliability log`, true);
-  progressEl.textContent = `Done — ${allResults.length} batters evaluated across ${state.games.length} games.`;
+  const pctWithStatcast = allResults.length ? Math.round(allResults.filter(r=>getStatcastForBatter(r.id)).length/allResults.length*100) : 0;
+  progressEl.textContent = `Done — ${allResults.length} batters · Statcast applied to ${pctWithStatcast}% · Platoon splits where sample allows.`;
   scanBtn.disabled = false;
 }
 
