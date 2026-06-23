@@ -138,11 +138,39 @@
   .leaderboard-row{display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid var(--line); cursor:pointer;}
   .leaderboard-row:last-child{border-bottom:none;}
   .leaderboard-row:hover{background:rgba(244,241,234,0.04);}
+  .leaderboard-row.lb-dimmed{opacity:0.38;}
   .rank{font-family:var(--mono); font-size:13px; color:var(--chalk-dim); width:22px; flex-shrink:0;}
   .lb-main{flex:1; min-width:0;}
   .lb-name{font-weight:700; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .lb-meta{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
-  .lb-score{font-family:var(--mono); font-weight:700; font-size:15px; flex-shrink:0;}
+  .lb-right{display:flex; flex-direction:column; align-items:flex-end; gap:3px; flex-shrink:0;}
+  .lb-score{font-family:var(--mono); font-weight:700; font-size:15px;}
+  .lb-edge-badge{font-family:var(--mono); font-size:10px; padding:2px 6px; border-radius:10px; white-space:nowrap;}
+  .lb-edge-take{background:rgba(124,198,138,0.15); color:#7CC68A; border:1px solid #7CC68A;}
+  .lb-edge-close{background:rgba(232,163,61,0.12); color:var(--mustard); border:1px solid var(--mustard);}
+  .lb-edge-pass{background:rgba(74,111,165,0.12); color:var(--cold); border:1px solid var(--cold);}
+  .lb-edge-unknown{color:var(--chalk-dim); font-size:10px; font-family:var(--mono);}
+
+  .edge-gate-row{display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:12px; color:var(--chalk-dim);}
+  .edge-gate-row input{accent-color:var(--mustard);}
+
+  .breakeven-row{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); margin-top:4px;}
+  .breakeven-row .be-val{color:var(--mustard);}
+  .breakeven-row .be-good{color:#7CC68A;}
+  .breakeven-row .be-bad{color:var(--cold);}
+
+  .bestbets-panel{background:linear-gradient(135deg,rgba(193,80,46,0.12),rgba(232,163,61,0.07)); border:1px solid var(--mustard); border-radius:10px; padding:14px; margin-bottom:14px;}
+  .bestbets-title{font-family:var(--display); font-size:22px; text-transform:uppercase; letter-spacing:0.5px; color:var(--mustard); margin:0 0 4px;}
+  .bestbets-sub{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); margin-bottom:10px;}
+  .bestbet-row{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid rgba(232,163,61,0.15);}
+  .bestbet-row:last-child{border-bottom:none;}
+  .bestbet-left{flex:1;}
+  .bestbet-name{font-weight:700; font-size:13px;}
+  .bestbet-meta{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); margin-top:2px;}
+  .bestbet-right{text-align:right; flex-shrink:0;}
+  .bestbet-edge{font-family:var(--mono); font-weight:700; font-size:14px; color:#7CC68A;}
+  .bestbet-odds{font-family:var(--mono); font-size:11px; color:var(--chalk-dim);}
+  .no-lines-notice{font-family:var(--mono); font-size:11px; color:var(--mustard); padding:8px; background:rgba(232,163,61,0.08); border-radius:6px; border:1px solid rgba(232,163,61,0.2); margin-bottom:10px;}
   .progress-text{font-family:var(--mono); font-size:12px; color:var(--mustard); margin-top:8px;}
 
   .pick-row{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px; border-bottom:1px solid var(--line); font-size:13px;}
@@ -208,13 +236,18 @@
 
     <div class="panel">
       <div class="panel-title">Auto Scan</div>
-      <div class="panel-desc">Ranks batters across today's slate by HR likelihood automatically. Uses season + last-15-game blended rates. Wind direction isn't applied here (unreliable without confirmed park orientation per-stadium) — only park factor and temperature are baked into the rank. Can take a while on a big slate.</div>
+      <div class="panel-desc">Ranks batters across today's slate by HR likelihood. Load live lines first — that's what turns raw projections into real edge calls.</div>
       <button class="ghost" id="hrLoadOddsBtn" type="button" style="width:100%; margin-bottom:8px;">Load Live Lines (DraftKings/FanDuel)</button>
       <div class="odds-status" id="hrOddsStatus"></div>
+      <div id="hrNoLinesNotice" class="no-lines-notice" style="display:none;">⚠️ Live lines not loaded — leaderboard shows raw probability only, not edge. Load lines above before picking.</div>
       <button class="primary" id="scanBtn" style="width:100%;">Scan Today's Slate</button>
       <div class="progress-text" id="scanProgress"></div>
       <div id="hrBestBet"></div>
-      <div id="leaderboard" style="margin-top:10px;"></div>
+      <div class="edge-gate-row" id="hrEdgeGateRow" style="display:none;">
+        <input type="checkbox" id="hrEdgeGate">
+        <label for="hrEdgeGate" style="margin:0; font-family:var(--body);">Hide plays with &lt; 3pt edge (Take plays only)</label>
+      </div>
+      <div id="leaderboard" style="margin-top:6px;"></div>
     </div>
 
     <div class="panel">
@@ -308,10 +341,15 @@
       <div class="panel-desc">Ranks every probable starter on today's slate by projected strikeouts. Tap a row to load it into the calculator below with a real opposing-team K rate.</div>
       <button class="ghost" id="ksLoadOddsBtn" type="button" style="width:100%; margin-bottom:8px;">Load Live Lines (DraftKings/FanDuel)</button>
       <div class="odds-status" id="ksOddsStatus"></div>
+      <div id="ksNoLinesNotice" class="no-lines-notice" style="display:none;">⚠️ Live lines not loaded — rankings show raw projection only, not edge vs book.</div>
       <button class="primary" id="ksScanBtn" style="width:100%;">Scan Today's Slate</button>
       <div class="progress-text" id="ksScanProgress"></div>
       <div id="ksBestBet"></div>
-      <div id="ksLeaderboard" style="margin-top:10px;"></div>
+      <div class="edge-gate-row" id="ksEdgeGateRow" style="display:none;">
+        <input type="checkbox" id="ksEdgeGate">
+        <label for="ksEdgeGate" style="margin:0; font-family:var(--body);">Hide plays with &lt; 3pt edge</label>
+      </div>
+      <div id="ksLeaderboard" style="margin-top:6px;"></div>
     </div>
 
     <div class="panel">
@@ -368,10 +406,15 @@
       <div class="panel-desc">Ranks every probable starter on today's slate by projected outs recorded, factoring opponent offense strength. Tap a row to load it into the calculator below.</div>
       <button class="ghost" id="outsLoadOddsBtn" type="button" style="width:100%; margin-bottom:8px;">Load Live Lines (DraftKings/FanDuel)</button>
       <div class="odds-status" id="outsOddsStatus"></div>
+      <div id="outsNoLinesNotice" class="no-lines-notice" style="display:none;">⚠️ Live lines not loaded — rankings show raw projection only, not edge vs book.</div>
       <button class="primary" id="outsScanBtn" style="width:100%;">Scan Today's Slate</button>
       <div class="progress-text" id="outsScanProgress"></div>
       <div id="outsBestBet"></div>
-      <div id="outsLeaderboard" style="margin-top:10px;"></div>
+      <div class="edge-gate-row" id="outsEdgeGateRow" style="display:none;">
+        <input type="checkbox" id="outsEdgeGate">
+        <label for="outsEdgeGate" style="margin:0; font-family:var(--body);">Hide plays with &lt; 3pt edge</label>
+      </div>
+      <div id="outsLeaderboard" style="margin-top:6px;"></div>
     </div>
 
     <div class="panel">
@@ -425,10 +468,15 @@
       <div class="panel-desc">Runs the win model across every game on today's slate at once, biggest favorites first. Tap a row to load it into the calculator below.</div>
       <button class="ghost" id="winLoadOddsBtn" type="button" style="width:100%; margin-bottom:8px;">Load Live Lines (DraftKings/FanDuel)</button>
       <div class="odds-status" id="winOddsStatus"></div>
+      <div id="winNoLinesNotice" class="no-lines-notice" style="display:none;">⚠️ Live lines not loaded. Short favorites look safe but are traps without real edge — load lines first.</div>
       <button class="primary" id="winScanBtn" style="width:100%;">Scan Today's Slate</button>
       <div class="progress-text" id="winScanProgress"></div>
       <div id="winBestBet"></div>
-      <div id="winLeaderboard" style="margin-top:10px;"></div>
+      <div class="edge-gate-row" id="winEdgeGateRow" style="display:none;">
+        <input type="checkbox" id="winEdgeGate">
+        <label for="winEdgeGate" style="margin:0; font-family:var(--body);">Hide plays with &lt; 3pt edge</label>
+      </div>
+      <div id="winLeaderboard" style="margin-top:6px;"></div>
     </div>
 
     <div class="panel">
@@ -445,10 +493,12 @@
         <div class="team-prob-box">
           <div class="tname" id="winAwayName">AWAY</div>
           <div class="tprob" id="winAwayProb">--%</div>
+          <div class="breakeven-row" id="winAwayBE"></div>
         </div>
         <div class="team-prob-box">
           <div class="tname" id="winHomeName">HOME</div>
           <div class="tprob" id="winHomeProb">--%</div>
+          <div class="breakeven-row" id="winHomeBE"></div>
         </div>
       </div>
       <div class="stat-grid" style="margin-top:10px;">
@@ -525,6 +575,12 @@
   <!-- ============ PROPS LAB TAB ============ -->
   <div id="tab-lab" style="display:none;">
 
+    <div id="labBestBetsPanel" class="bestbets-panel" style="display:none;">
+      <div class="bestbets-title">Best Bets Today</div>
+      <div class="bestbets-sub" id="labBestBetsSub"></div>
+      <div id="labBestBetsList"></div>
+    </div>
+
     <div class="panel">
       <div class="panel-title">Reliability By Type</div>
       <div class="panel-desc">Hit rate breakdown once props are graded. A model worth following should beat 50% on "Take" calls — especially in the Strong Edge tier. Build up at least 20–30 graded picks per type before trusting the number.</div>
@@ -534,6 +590,10 @@
     <div class="panel">
       <div class="panel-title">Tracked Props <small id="labCount"></small></div>
       <div class="panel-desc">Auto-captured any time you load live lines and our model sees an edge. Grade after the game to build the reliability record.</div>
+      <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+        <button id="labBulkGradeBtn" class="primary" style="font-size:12px; padding:7px 12px;">Auto-Grade All Pending from Box Scores</button>
+        <button id="labClearGradedBtn" class="ghost" style="font-size:12px; padding:7px 12px;">Clear Graded</button>
+      </div>
       <div class="lab-filter-row">
         <button class="lab-filter-btn active" data-filter="all">All</button>
         <button class="lab-filter-btn" data-filter="HR">HR</button>
@@ -1409,7 +1469,7 @@ async function runAutoScan(){
   }, 3, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
 
   allResults.sort((a,b)=> b.prob - a.prob);
-  renderLeaderboard(allResults.slice(0,30));
+  window.__lastHrResults=allResults.slice(0,30); renderLeaderboard(window.__lastHrResults);
   const hrCandidates = allResults.map(r=>({
     subject:r.name, detail:`(${r.team}) vs ${r.opp}`, probability:r.prob,
     oddsRow: findPlayerOdds(PROP_MARKET.HR, r.name), gamePk:r.gamePk
@@ -1421,34 +1481,48 @@ async function runAutoScan(){
   scanBtn.disabled = false;
 }
 
+function edgeBadgeHTML(edge, hasLines){
+  if(!hasLines) return '';
+  if(edge===null) return '<div class="lb-edge-unknown">no line</div>';
+  const cls = edge>=0.04?'lb-edge-take':edge>=0?'lb-edge-close':'lb-edge-pass';
+  return `<div class="lb-edge-badge ${cls}">${edge>=0?'+':''}${(edge*100).toFixed(1)}pt</div>`;
+}
+
 function renderLeaderboard(results){
   const wrap = document.getElementById('leaderboard');
-  if(!results.length){
-    wrap.innerHTML = '<div class="empty-state">No results — probable pitchers or rosters may not be loaded yet for this date.</div>';
-    return;
-  }
+  const hasLines = (state.liveOdds[PROP_MARKET.HR]||[]).length > 0;
+  const edgeGate = hasLines && document.getElementById('hrEdgeGate') && document.getElementById('hrEdgeGate').checked;
+  const el = document.getElementById('hrNoLinesNotice'); if(el) el.style.display = hasLines?'none':'block';
+  const eg = document.getElementById('hrEdgeGateRow'); if(eg) eg.style.display = hasLines?'flex':'none';
+  if(!results.length){ wrap.innerHTML = '<div class="empty-state">No results — probable pitchers or rosters may not be loaded yet.</div>'; return; }
   wrap.innerHTML = '';
+  let shown = 0;
   results.forEach((r,i)=>{
+    const oddsRow = hasLines ? findPlayerOdds(PROP_MARKET.HR, r.name) : null;
+    const edge = oddsRow ? r.prob - oddsRow.odds_probability : null;
+    if(edgeGate && (edge===null||edge<0.03)) return;
+    shown++;
     const row = document.createElement('div');
-    row.className = 'leaderboard-row';
-    row.innerHTML = `
-      <div class="rank">${i+1}</div>
+    row.className = 'leaderboard-row'+(hasLines&&edge!==null&&edge<0?' lb-dimmed':'');
+    row.innerHTML = `<div class="rank">${i+1}</div>
       <div class="lb-main">
         <div class="lb-name">${r.name} <span style="color:var(--chalk-dim); font-weight:400;">(${r.team})</span></div>
         <div class="lb-meta">vs ${r.opp}</div>
       </div>
-      <div class="lb-score" style="color:${r.tag.color};">${pct(r.prob)}</div>
-    `;
+      <div class="lb-right">
+        <div class="lb-score" style="color:${r.tag.color};">${pct(r.prob)}</div>
+        ${edgeBadgeHTML(edge, hasLines)}
+      </div>`;
     row.addEventListener('click', ()=>{
-      window.__lastCalc = { propType:'HR', batterName:r.name, pitcherName:r.opp, gameProb:r.prob, tag:r.tag.label, gamePk:r.gamePk, date:r.date };
+      window.__lastCalc = { propType:'HR', batterName:r.name, pitcherName:r.opp, gameProb:r.prob, tag:r.tag.label, gamePk:r.gamePk, date:r.date, oddsRow };
       saveCurrentPick();
     });
     wrap.appendChild(row);
   });
+  if(!shown) wrap.innerHTML = '<div class="empty-state">No Take-rated plays found. Try unchecking the edge filter, or wait for sharper lines.</div>';
   const hint = document.createElement('div');
-  hint.className = 'panel-desc';
-  hint.style.marginTop = '8px';
-  hint.textContent = 'Tap a row to save it straight to Pick Tracking.';
+  hint.className = 'panel-desc'; hint.style.marginTop = '8px';
+  hint.textContent = hasLines ? 'Green = Take (4+pt edge). Dimmed = book has better info. Tap to save.' : 'Load live lines above to see real edge on each play.';
   wrap.appendChild(hint);
 }
 
@@ -1596,7 +1670,7 @@ async function runKsAutoScan(){
   }, 4, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
 
   allResults.sort((a,b)=> b.lambda - a.lambda);
-  renderKsLeaderboard(allResults.slice(0,30));
+  window.__lastKsResults=allResults.slice(0,30); renderKsLeaderboard(window.__lastKsResults);
   const ksCandidates = allResults.map(r=>{
     const oddsRow = findPlayerOdds(PROP_MARKET.K, r.name);
     const overProb = oddsRow ? 1 - poissonCDF(Math.floor(oddsRow.line), r.lambda) : r.lambda/15; // rough fallback scale if no line yet
@@ -1611,31 +1685,44 @@ async function runKsAutoScan(){
 
 function renderKsLeaderboard(results){
   const wrap = document.getElementById('ksLeaderboard');
-  if(!results.length){ wrap.innerHTML = '<div class="empty-state">No results — probable pitchers may not be listed yet for this date.</div>'; return; }
+  const hasLines = (state.liveOdds[PROP_MARKET.K]||[]).length > 0;
+  const edgeGate = hasLines && document.getElementById('ksEdgeGate') && document.getElementById('ksEdgeGate').checked;
+  const el = document.getElementById('ksNoLinesNotice'); if(el) el.style.display = hasLines?'none':'block';
+  const eg = document.getElementById('ksEdgeGateRow'); if(eg) eg.style.display = hasLines?'flex':'none';
+  if(!results.length){ wrap.innerHTML = '<div class="empty-state">No results — probable pitchers may not be listed yet.</div>'; return; }
   wrap.innerHTML = '';
+  let shown = 0;
   results.forEach((r,i)=>{
+    const oddsRow = hasLines ? findPlayerOdds(PROP_MARKET.K, r.name) : null;
+    const overProb = oddsRow ? 1 - poissonCDF(Math.floor(oddsRow.line), r.lambda) : null;
+    const edge = oddsRow && overProb !== null ? overProb - oddsRow.odds_probability : null;
+    if(edgeGate && (edge===null||edge<0.03)) return;
+    shown++;
     const row = document.createElement('div');
-    row.className = 'leaderboard-row';
-    row.innerHTML = `
-      <div class="rank">${i+1}</div>
+    row.className = 'leaderboard-row'+(hasLines&&edge!==null&&edge<0?' lb-dimmed':'');
+    row.innerHTML = `<div class="rank">${i+1}</div>
       <div class="lb-main">
         <div class="lb-name">${r.name} <span style="color:var(--chalk-dim); font-weight:400;">(${r.team})</span></div>
-        <div class="lb-meta">vs ${r.opp} · ${r.bf.toFixed(0)} proj. BF</div>
+        <div class="lb-meta">vs ${r.opp}${oddsRow?' · line '+oddsRow.line:''}</div>
       </div>
-      <div class="lb-score">${r.lambda.toFixed(1)} K</div>
-    `;
+      <div class="lb-right">
+        <div class="lb-score">${r.lambda.toFixed(1)} K</div>
+        ${edgeBadgeHTML(edge, hasLines)}
+      </div>`;
     row.addEventListener('click', async ()=>{
       document.getElementById('ksGameSelect').value = r.gamePk;
       onKsGameChange();
       document.getElementById('ksPitcherSelect').value = r.pitcherId;
+      if(oddsRow) document.getElementById('ksLine').value = oddsRow.line;
       await runKsCalculation();
       document.getElementById('ksResultPanel').scrollIntoView({behavior:'smooth', block:'nearest'});
     });
     wrap.appendChild(row);
   });
+  if(!shown) wrap.innerHTML = '<div class="empty-state">No Take-rated K plays. Uncheck the edge filter or wait for sharper lines.</div>';
   const hint = document.createElement('div');
   hint.className = 'panel-desc'; hint.style.marginTop = '8px';
-  hint.textContent = 'Ranked by projected strikeouts. Tap a row to load it into the calculator with the real opponent K rate, then set your line.';
+  hint.textContent = hasLines ? 'Green = Take. Tap a row to auto-fill the line and calculator.' : 'Load live lines to see edge and auto-fill sportsbook lines.';
   wrap.appendChild(hint);
 }
 
@@ -1729,7 +1816,7 @@ async function runOutsAutoScan(){
   }, 4, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
 
   allResults.sort((a,b)=> b.projOuts - a.projOuts);
-  renderOutsLeaderboard(allResults.slice(0,30));
+  window.__lastOutsResults=allResults.slice(0,30); renderOutsLeaderboard(window.__lastOutsResults);
   renderBestBet('outsBestBet', allResults.map(r=>{
     const oddsRow = findPlayerOdds(PROP_MARKET.OUTS, r.name);
     const overProb = oddsRow ? 1 - normalCDF(oddsRow.line, r.projOuts, OUTS_SD) : r.projOuts/20;
@@ -1741,31 +1828,44 @@ async function runOutsAutoScan(){
 
 function renderOutsLeaderboard(results){
   const wrap = document.getElementById('outsLeaderboard');
-  if(!results.length){ wrap.innerHTML = '<div class="empty-state">No results — probable pitchers may not be listed yet for this date.</div>'; return; }
+  const hasLines = (state.liveOdds[PROP_MARKET.OUTS]||[]).length > 0;
+  const edgeGate = hasLines && document.getElementById('outsEdgeGate') && document.getElementById('outsEdgeGate').checked;
+  const el = document.getElementById('outsNoLinesNotice'); if(el) el.style.display = hasLines?'none':'block';
+  const eg = document.getElementById('outsEdgeGateRow'); if(eg) eg.style.display = hasLines?'flex':'none';
+  if(!results.length){ wrap.innerHTML = '<div class="empty-state">No results — probable pitchers may not be listed yet.</div>'; return; }
   wrap.innerHTML = '';
+  let shown = 0;
   results.forEach((r,i)=>{
+    const oddsRow = hasLines ? findPlayerOdds(PROP_MARKET.OUTS, r.name) : null;
+    const overProb = oddsRow ? 1 - normalCDF(oddsRow.line, r.projOuts, OUTS_SD) : null;
+    const edge = oddsRow && overProb !== null ? overProb - oddsRow.odds_probability : null;
+    if(edgeGate && (edge===null||edge<0.03)) return;
+    shown++;
     const row = document.createElement('div');
-    row.className = 'leaderboard-row';
-    row.innerHTML = `
-      <div class="rank">${i+1}</div>
+    row.className = 'leaderboard-row'+(hasLines&&edge!==null&&edge<0?' lb-dimmed':'');
+    row.innerHTML = `<div class="rank">${i+1}</div>
       <div class="lb-main">
         <div class="lb-name">${r.name} <span style="color:var(--chalk-dim); font-weight:400;">(${r.team})</span></div>
-        <div class="lb-meta">vs ${r.opp} · offense factor ${r.offenseFactor.toFixed(2)}x</div>
+        <div class="lb-meta">vs ${r.opp}${oddsRow?' · line '+oddsRow.line:''} · opp factor ${r.offenseFactor.toFixed(2)}x</div>
       </div>
-      <div class="lb-score">${r.projOuts.toFixed(1)}</div>
-    `;
+      <div class="lb-right">
+        <div class="lb-score">${r.projOuts.toFixed(1)}</div>
+        ${edgeBadgeHTML(edge, hasLines)}
+      </div>`;
     row.addEventListener('click', async ()=>{
       document.getElementById('outsGameSelect').value = r.gamePk;
       onOutsGameChange();
       document.getElementById('outsPitcherSelect').value = r.pitcherId;
+      if(oddsRow) document.getElementById('outsLine').value = oddsRow.line;
       await runOutsCalculation();
       document.getElementById('outsResultPanel').scrollIntoView({behavior:'smooth', block:'nearest'});
     });
     wrap.appendChild(row);
   });
+  if(!shown) wrap.innerHTML = '<div class="empty-state">No Take-rated Outs plays. Uncheck the edge filter or wait for sharper lines.</div>';
   const hint = document.createElement('div');
   hint.className = 'panel-desc'; hint.style.marginTop = '8px';
-  hint.textContent = 'Ranked by projected outs recorded. Tap a row to load it into the calculator below.';
+  hint.textContent = hasLines ? 'Green = Take. Tap a row to auto-fill the line and calculator.' : 'Load live lines to see edge and auto-fill sportsbook lines.';
   wrap.appendChild(hint);
 }
 
@@ -1822,6 +1922,19 @@ async function runWinCalculation(){
   const mlRows = state.liveOdds.moneyline || null;
   const awayOddsRow = findMoneylineOddsForTeam(mlRows, r.awayName);
   const homeOddsRow = findMoneylineOddsForTeam(mlRows, r.homeName);
+
+  // Break-even display
+  ['away','home'].forEach(side=>{
+    const beEl = document.getElementById(`win${side==='away'?'Away':'Home'}BE`);
+    if(!beEl) return;
+    const row = side==='away' ? awayOddsRow : homeOddsRow;
+    const prob = side==='away' ? r.awayProb : r.homeProb;
+    if(row){
+      const be = 1/americanToDecimal(row.odds_american);
+      const cls = prob > be+0.03 ? 'be-good' : prob < be-0.03 ? 'be-bad' : 'be-val';
+      beEl.innerHTML = `needs <span class="${cls}">${pct(be)}</span> to profit`;
+    } else { beEl.textContent = 'load lines for break-even'; }
+  });
   const edgeBlockEl = document.getElementById('winEdgeBlock');
   if(awayOddsRow || homeOddsRow){
     const awayEdge = awayOddsRow ? r.awayProb - awayOddsRow.odds_probability : null;
@@ -1859,7 +1972,7 @@ async function runWinAutoScan(){
   }, 4, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
 
   allResults.sort((a,b)=> Math.max(b.homeProb,b.awayProb) - Math.max(a.homeProb,a.awayProb));
-  renderWinLeaderboard(allResults);
+  window.__lastWinResults=allResults; renderWinLeaderboard(window.__lastWinResults);
   const mlRows = state.liveOdds.moneyline || null;
   const winCandidates = [];
   allResults.forEach(r=>{
@@ -1878,19 +1991,45 @@ function renderWinLeaderboard(results){
   if(!results.length){ wrap.innerHTML = '<div class="empty-state">No games found for this date.</div>'; return; }
   wrap.innerHTML = '';
   results.forEach((r,i)=>{
-    const favIsHome = r.homeProb >= r.awayProb;
-    const favAbbr = favIsHome ? r.homeAbbr : r.awayAbbr;
-    const favProb = favIsHome ? r.homeProb : r.awayProb;
+    const mlRows = state.liveOdds.moneyline || null;
+    const hasLines = mlRows && mlRows.length > 0;
+    // Find the best (highest-edge) side for this game
+    const awayOdds = findMoneylineOddsForTeam(mlRows, r.awayName);
+    const homeOdds = findMoneylineOddsForTeam(mlRows, r.homeName);
+    const awayEdge = awayOdds ? r.awayProb - awayOdds.odds_probability : null;
+    const homeEdge = homeOdds ? r.homeProb - homeOdds.odds_probability : null;
+    // Pick side with better edge, or higher model prob if no lines
+    let bestSide, bestProb, bestEdge, bestOdds;
+    if(awayEdge !== null || homeEdge !== null){
+      if((awayEdge||=-Infinity) >= (homeEdge||=-Infinity)){
+        bestSide=r.awayAbbr; bestProb=r.awayProb; bestEdge=awayEdge; bestOdds=awayOdds;
+      } else {
+        bestSide=r.homeAbbr; bestProb=r.homeProb; bestEdge=homeEdge; bestOdds=homeOdds;
+      }
+    } else {
+      const favIsHome = r.homeProb >= r.awayProb;
+      bestSide=favIsHome?r.homeAbbr:r.awayAbbr; bestProb=favIsHome?r.homeProb:r.awayProb; bestEdge=null; bestOdds=null;
+    }
+    const edgeGate = hasLines && document.getElementById('winEdgeGate') && document.getElementById('winEdgeGate').checked;
+    if(edgeGate && (bestEdge===null||bestEdge<0.03)) return;
+    // Break-even %
+    const beHTML = bestOdds ? (() => {
+      const be = 1/americanToDecimal(bestOdds.odds_american);
+      const cls = bestProb > be+0.03 ? 'be-good' : bestProb < be-0.03 ? 'be-bad' : 'be-val';
+      return `<div class="breakeven-row">needs <span class="${cls}">${pct(be)}</span> to profit · our model: ${pct(bestProb)}</div>`;
+    })() : '';
     const row = document.createElement('div');
-    row.className = 'leaderboard-row';
-    row.innerHTML = `
-      <div class="rank">${i+1}</div>
+    row.className = 'leaderboard-row'+(hasLines&&bestEdge!==null&&bestEdge<0?' lb-dimmed':'');
+    row.innerHTML = `<div class="rank">${i+1}</div>
       <div class="lb-main">
         <div class="lb-name">${r.awayAbbr} @ ${r.homeAbbr}</div>
-        <div class="lb-meta">Favorite: ${favAbbr}</div>
+        <div class="lb-meta">Best side: ${bestSide}${bestOdds?' · '+(bestOdds.odds_american>0?'+':'')+bestOdds.odds_american:''}</div>
+        ${beHTML}
       </div>
-      <div class="lb-score">${pct(favProb)}</div>
-    `;
+      <div class="lb-right">
+        <div class="lb-score">${pct(bestProb)}</div>
+        ${edgeBadgeHTML(bestEdge, hasLines)}
+      </div>`;
     row.addEventListener('click', async ()=>{
       document.getElementById('winGameSelect').value = r.gamePk;
       await runWinCalculation();
@@ -1898,9 +2037,12 @@ function renderWinLeaderboard(results){
     });
     wrap.appendChild(row);
   });
+  const el = document.getElementById('winNoLinesNotice'); if(el) el.style.display = (state.liveOdds.moneyline||[]).length?'none':'block';
+  const eg = document.getElementById('winEdgeGateRow'); if(eg) eg.style.display = (state.liveOdds.moneyline||[]).length?'flex':'none';
+  if(!wrap.children.length) wrap.innerHTML = '<div class="empty-state">No Take-rated games. Short favorites with no edge filtered out — uncheck edge gate or load lines.</div>';
   const hint = document.createElement('div');
   hint.className = 'panel-desc'; hint.style.marginTop = '8px';
-  hint.textContent = 'Sorted by biggest favorite first. Tap a row to load it into the calculator below.';
+  hint.textContent = (state.liveOdds.moneyline||[]).length ? 'Break-even shown per game. Green = model beats it. Dim = book has the edge.' : 'Load live lines to see break-even % and real edge per game.';
   wrap.appendChild(hint);
 }
 
@@ -2529,11 +2671,126 @@ function edgeTierLabel(tier){
   return { cls:'tier-small', label:'Small 1–4pts' };
 }
 
+function renderLabBestBets(allProps){
+  const panel = document.getElementById('labBestBetsPanel');
+  const list = document.getElementById('labBestBetsList');
+  const sub = document.getElementById('labBestBetsSub');
+  if(!panel || !list) return;
+
+  const todayTake = allProps.filter(p=>
+    p.date === state.date && p.status === 'pending' && p.edge >= 0.04
+  ).sort((a,b)=> b.edge - a.edge);
+
+  if(!todayTake.length){
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  sub.textContent = `${todayTake.length} edge play${todayTake.length!==1?'s':''} found today · sorted by edge vs book`;
+  list.innerHTML = '';
+
+  // Group by prop type and show top 1 per type, then fill remainder
+  const typeOrder = ['HR','K','OUTS','WINNER'];
+  const shown = new Set();
+  const ordered = [];
+  typeOrder.forEach(t=>{
+    const top = todayTake.find(p=>p.propType===t && !shown.has(p.id));
+    if(top){ ordered.push(top); shown.add(top.id); }
+  });
+  todayTake.forEach(p=>{ if(!shown.has(p.id)){ ordered.push(p); shown.add(p.id); } });
+
+  ordered.slice(0,6).forEach(p=>{
+    const row = document.createElement('div');
+    row.className = 'bestbet-row';
+    row.innerHTML = `
+      <div class="bestbet-left">
+        <div class="bestbet-name"><span class="type-chip">${p.propType}</span>${p.subject}</div>
+        <div class="bestbet-meta">${p.detail} · ${p.matchup} · ${p.sportsbook} ${p.oddsAmerican>0?'+':''}${p.oddsAmerican}</div>
+      </div>
+      <div class="bestbet-right">
+        <div class="bestbet-edge">+${(p.edge*100).toFixed(1)}pt edge</div>
+        <div class="bestbet-odds">model ${pct(p.modelProb)} vs implied ${pct(p.impliedProb)}</div>
+      </div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+async function bulkGradeAllPending(){
+  const props = loadLabProps();
+  const pending = props.filter(p=>p.status==='pending' && p.date < state.date);
+  if(!pending.length){
+    alert('No pending picks from past dates to grade. Today\'s picks can only be graded after games finish.');
+    return;
+  }
+  const statusEl = document.getElementById('labCount');
+  let graded = 0;
+  const gamePks = [...new Set(pending.map(p=>p.gamePk).filter(Boolean))];
+  const boxScores = {};
+  for(const pk of gamePks){
+    const data = await safeFetchJSON(`${API}/game/${pk}/boxscore`, `boxscore ${pk}`);
+    if(data) boxScores[pk] = data;
+  }
+  pending.forEach(p=>{
+    if(!p.gamePk || !boxScores[p.gamePk]) return;
+    const data = boxScores[p.gamePk];
+    const prop = props.find(x=>x.id===p.id);
+    if(!prop) return;
+
+    const findPlayer = ()=>{
+      let found = null;
+      ['home','away'].forEach(side=>{
+        const players = data.teams?.[side]?.players;
+        if(!players) return;
+        Object.values(players).forEach(pl=>{
+          if(p.subject.startsWith(pl.person.fullName)) found = pl;
+        });
+      });
+      return found;
+    };
+
+    if(p.propType==='HR'){
+      const pl = findPlayer();
+      const hr = pl?.stats?.batting?.homeRuns;
+      if(hr!=null){ prop.status = hr>0?'win':'loss'; graded++; }
+    } else if(p.propType==='K'){
+      const pl = findPlayer();
+      const k = pl?.stats?.pitching?.strikeOuts;
+      if(k!=null && p.line!=null){
+        prop.status = k===p.line?'push':p.side==='Over'?k>p.line?'win':'loss':k<p.line?'win':'loss';
+        graded++;
+      }
+    } else if(p.propType==='OUTS'){
+      const pl = findPlayer();
+      const ip = pl?.stats?.pitching?.inningsPitched;
+      if(ip!=null && p.line!=null){
+        const outs = parseInningsToOuts(ip);
+        prop.status = outs===p.line?'push':p.side==='Over'?outs>p.line?'win':'loss':outs<p.line?'win':'loss';
+        graded++;
+      }
+    } else if(p.propType==='WINNER'){
+      const hr = data.teams?.home?.teamStats?.batting?.runs;
+      const ar = data.teams?.away?.teamStats?.batting?.runs;
+      if(hr!=null && ar!=null && hr!==ar){
+        const winSide = hr>ar?'Home':'Away';
+        prop.status = p.side===winSide?'win':'loss'; graded++;
+      }
+    }
+  });
+
+  saveLabProps(props);
+  renderLab();
+  alert(`Auto-graded ${graded} picks from box scores.${graded<pending.length?' Some games may not be final yet — run again later.':''}`);
+}
+
 function renderLab(){
   const allProps = loadLabProps();
   const labCount = document.getElementById('labCount');
   const labList = document.getElementById('labList');
   if(labCount) labCount.textContent = `${allProps.length} captured`;
+
+  // Best Bets Today panel — today's pending props sorted by edge, Take-tier only
+  renderLabBestBets(allProps);
 
   // Build reliability stats
   renderLabReliability(allProps);
@@ -2781,6 +3038,25 @@ function init(){
   });
   document.getElementById('parlayAutoBuildBtn').addEventListener('click', autoBuiltParlay);
   document.getElementById('parlaySaveBtn').addEventListener('click', saveGeneratedToTracking);
+
+  // Edge gate toggles — re-render leaderboard when toggled
+  ['hr','ks','outs','win'].forEach(tab=>{
+    const gate = document.getElementById(`${tab}EdgeGate`);
+    if(gate) gate.addEventListener('change', ()=>{
+      if(tab==='hr') renderLeaderboard(window.__lastHrResults||[]);
+      if(tab==='ks') renderKsLeaderboard(window.__lastKsResults||[]);
+      if(tab==='outs') renderOutsLeaderboard(window.__lastOutsResults||[]);
+      if(tab==='win') renderWinLeaderboard(window.__lastWinResults||[]);
+    });
+  });
+
+  document.getElementById('labBulkGradeBtn').addEventListener('click', bulkGradeAllPending);
+  document.getElementById('labClearGradedBtn').addEventListener('click', ()=>{
+    const props = loadLabProps().filter(p=>p.status==='pending');
+    saveLabProps(props);
+    renderLab();
+    alert('Cleared all graded props.');
+  });
 
   loadSchedule(state.date);
   renderPicks();
