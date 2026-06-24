@@ -250,6 +250,12 @@
       <div id="leaderboard" style="margin-top:6px;"></div>
     </div>
 
+    <div class="panel" id="hrPropsBoardPanel" style="display:none;">
+      <div class="panel-title">HR Props on the Board <small id="hrBoardCount"></small></div>
+      <div class="panel-desc">Every batter with a HR prop offered today, ranked by edge vs book. Model probability comes from the scan above. Green = we like the Over.</div>
+      <div id="hrPropsBoard"></div>
+    </div>
+
     <div class="panel">
       <div class="panel-title">Build Matchup <small>fine-tune a single pick</small></div>
 
@@ -753,7 +759,8 @@ let state = {
   statcastLoaded: false,
   platoonSplits: {},     // `${personId}_vr` / `_vl` -> {hr, pa, rate}
   lineupCache: {},       // gamePk -> [{personId, battingOrder, position}]
-  pitcherHands: {}       // personId -> 'R'|'L'
+  pitcherHands: {},      // personId -> 'R'|'L'
+  hrScanByName: {}       // lowercase name -> {prob, gamePk, team, opp} — populated after HR scan
 };
 
 /* =========================================================================
@@ -1440,6 +1447,8 @@ async function loadLiveOdds(marketSlug, statusElId){
       statusEl.textContent += ` · ${captured} new edge plays captured to Props Lab`;
     }
   }
+  // Re-render the HR board whenever HR lines or scan results update
+  if(marketSlug === PROP_MARKET.HR) renderHRPropsBoard();
 
   return flat;
 }
@@ -1782,14 +1791,27 @@ async function runAutoScan(){
   }, 3, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
 
   allResults.sort((a,b)=> b.prob - a.prob);
+
+  // Cache by name so live-odds capture can look up model probs by player name
+  state.hrScanByName = {};
+  allResults.forEach(r=>{ state.hrScanByName[r.name.toLowerCase()] = r; });
+
   window.__lastHrResults=allResults.slice(0,30); renderLeaderboard(window.__lastHrResults);
   const hrCandidates = allResults.map(r=>({
     subject:r.name, detail:`(${r.team}) vs ${r.opp}`, probability:r.prob,
     oddsRow: findPlayerOdds(PROP_MARKET.HR, r.name), gamePk:r.gamePk
   }));
   renderBestBet('hrBestBet', hrCandidates);
+
+  // Now that we have model probs, re-run capture against any already-loaded HR lines
+  const hrLines = state.liveOdds[PROP_MARKET.HR] || [];
+  if(hrLines.length) captureLabProps(PROP_MARKET.HR, 'HR', hrLines);
+
+  // Render the HR Props Board
+  renderHRPropsBoard();
+
   const pctWithStatcast = allResults.length ? Math.round(allResults.filter(r=>getStatcastForBatter(r.id)).length/allResults.length*100) : 0;
-  progressEl.textContent = `Done — ${allResults.length} batters · Statcast applied to ${pctWithStatcast}% · Platoon splits where sample allows.`;
+  progressEl.textContent = `Done — ${allResults.length} batters · Statcast ${pctWithStatcast}% · Platoon splits applied where sample allows.`;
   scanBtn.disabled = false;
 }
 
@@ -2937,15 +2959,22 @@ function captureLabProps(marketSlug, propType, rows){
 }
 
 // Look up our model's probability for a given live odds row.
-// Falls back to null if we don't have a fresh model calc for this player yet.
+// For HR: uses the scan cache (name-based) — populated when auto-scan runs.
+// For K/OUTS: uses pitching stats cache by player name match.
 function getModelProbForRow(propType, row){
   const playerName = row.player_name || row.selection;
   if(propType === 'HR'){
-    const batStats = state.battingStatsCache[row.player_name ? playerName : null];
-    if(!batStats) return null;
-    const parkFactor = PARK_FACTORS[row.home_team ? abbrFromName(row.home_team) : ''] || 1.0;
-    const calc = calcConfidence({batRate:batStats.blendedRate, pitHR9:LEAGUE_AVG_HR9, parkFactor, windMph:0, tempFactor:1, pa:4.1});
-    return calc.gameProb;
+    // Primary: use the scan results cache keyed by lowercase name (populated after scan)
+    const scan = state.hrScanByName[playerName?.toLowerCase()];
+    if(scan) return scan.prob;
+    // Fallback: try to compute from stats cache if available
+    const batStats = Object.values(state.battingStatsCache).find(s=>s._name && s._name.toLowerCase()===playerName?.toLowerCase());
+    if(batStats){
+      const parkFactor = PARK_FACTORS[row.home_team ? abbrFromName(row.home_team) : ''] || 1.0;
+      const calc = calcConfidence({batRate:batStats.blendedRate, pitHR9:LEAGUE_AVG_HR9, parkFactor, windMph:0, tempFactor:1, pa:4.1});
+      return calc.gameProb;
+    }
+    return null;
   }
   if(propType === 'K'){
     const pitStats = state.pitchingStatsCache[playerName];
@@ -3249,6 +3278,108 @@ function wireLabFilters(){
       btn.classList.add('active');
       labFilter = btn.dataset.filter;
       renderLab();
+    });
+  });
+}
+
+/* =========================================================================
+   HR PROPS BOARD — shows every HR prop offered today with model vs book
+   ========================================================================= */
+function renderHRPropsBoard(){
+  const panel = document.getElementById('hrPropsBoardPanel');
+  const wrap = document.getElementById('hrPropsBoard');
+  const countEl = document.getElementById('hrBoardCount');
+  if(!panel || !wrap) return;
+
+  const hrLines = state.liveOdds[PROP_MARKET.HR] || [];
+  const hasLines = hrLines.length > 0;
+  const hasScan = Object.keys(state.hrScanByName).length > 0;
+
+  if(!hasLines && !hasScan){ panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+
+  if(!hasLines){
+    wrap.innerHTML = '<div class="empty-state">Load live lines above to see today\'s offered HR props with model comparison.</div>';
+    return;
+  }
+  if(!hasScan){
+    wrap.innerHTML = '<div class="no-lines-notice">Run Scan Today\'s Slate above to get model probabilities for each offered prop.</div>';
+    return;
+  }
+
+  // Deduplicate by player+sportsbook — prefer main line
+  const seen = new Set();
+  const rows = hrLines.filter(r=>{
+    if(!r.player_name) return false;
+    const k = `${r.player_name}_${r.sportsbook}`;
+    if(seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  // Build board entries
+  const entries = rows.map(row=>{
+    const scan = state.hrScanByName[row.player_name.toLowerCase()];
+    const modelProb = scan ? scan.prob : null;
+    const implied = row.odds_probability;
+    const edge = modelProb !== null ? modelProb - implied : null;
+    return { row, scan, modelProb, implied, edge };
+  }).filter(e => e.modelProb !== null); // only show players we have model probs for
+
+  entries.sort((a,b)=> (b.edge||0) - (a.edge||0));
+
+  if(countEl) countEl.textContent = `${entries.length} props matched`;
+
+  if(!entries.length){
+    wrap.innerHTML = '<div class="empty-state">No HR props matched to scan results yet. Make sure to run Scan Today\'s Slate and Load Live Lines.</div>';
+    return;
+  }
+
+  wrap.innerHTML = '';
+  entries.forEach(e=>{
+    const {row, scan, modelProb, implied, edge} = e;
+    const isTake = edge !== null && edge >= 0.03;
+    const color = edge===null ? 'var(--chalk-dim)' : edge>=0.06?'#7CC68A':edge>=0.03?'var(--mustard)':edge>=0?'var(--chalk-dim)':'var(--cold)';
+    const label = edge===null ? '—' : edge>=0.06?'Take':edge>=0.03?'Lean':edge>=0?'Close':'Pass';
+
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px;border-bottom:1px solid var(--line);';
+    if(!isTake && edge !== null && edge < 0) div.style.opacity = '0.45';
+
+    div.innerHTML = `
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+          ${row.player_name} <span style="color:var(--chalk-dim);font-weight:400;">(${scan.team})</span>
+        </div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--chalk-dim);margin-top:2px;">
+          vs ${scan.opp} · ${row.sportsbook} · Over ${row.line} HR
+        </div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <div style="font-family:var(--mono);font-size:13px;font-weight:700;">${row.odds_american>0?'+':''}${row.odds_american}</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--chalk-dim);">impl ${pct(implied)} · model ${pct(modelProb)}</div>
+        <div style="font-family:var(--mono);font-size:11px;font-weight:700;color:${color};">${label}${edge!==null?' · '+(edge>=0?'+':'')+(edge*100).toFixed(1)+'pt':''}</div>
+      </div>
+      <button data-name="${row.player_name}" data-opp="${scan.opp}" data-prob="${modelProb}" data-gpk="${scan.gamePk||''}" class="hrBoardSave" style="font-size:11px;padding:5px 8px;flex-shrink:0;">+Track</button>
+    `;
+    wrap.appendChild(div);
+  });
+
+  // Save buttons
+  document.querySelectorAll('.hrBoardSave').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const picks = loadPicks();
+      picks.unshift({
+        id:newId(), propType:'HR', date:state.date,
+        gamePk:btn.dataset.gpk||null,
+        subject:btn.dataset.name,
+        detail:`HR vs ${btn.dataset.opp}`,
+        probability:parseFloat(btn.dataset.prob),
+        line:0.5, side:'Over', tag:'Board pick', status:'pending'
+      });
+      savePicks(picks);
+      renderPicks();
+      btn.textContent='✓ Saved'; btn.disabled=true;
     });
   });
 }
