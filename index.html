@@ -862,7 +862,31 @@ function populateParkSelect(){
    ========================================================================= */
 async function loadSchedule(dateStr){
   document.getElementById('gamesList').innerHTML = '<div class="empty-state">Loading games…</div>';
-  document.getElementById('leaderboard').innerHTML = '';
+  const leaderboardEl = document.getElementById('leaderboard');
+  if(leaderboardEl) leaderboardEl.innerHTML = '';
+
+  // Clear stale caches so fresh data comes in (pitcher lines, rosters, lineups change daily)
+  state.rosters = {};
+  state.pitcherHands = {};
+  state.lineupCache = {};
+  state.platoonSplits = {};
+  state.__winCache = {};
+  state.hrScanByName = {};
+  window.__lastHrResults = [];
+  window.__lastKsResults = [];
+  window.__lastOutsResults = [];
+  window.__lastWinResults = [];
+
+  // Reset leaderboards across all tabs
+  ['leaderboard','ksLeaderboard','outsLeaderboard','winLeaderboard',
+   'hrBestBet','ksBestBet','outsBestBet','winBestBet',
+   'hrPropsBoardPanel'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.innerHTML = '';
+  });
+  const boardPanel = document.getElementById('hrPropsBoardPanel');
+  if(boardPanel) boardPanel.style.display = 'none';
+
   const url = `${API}/schedule?sportId=1&date=${dateStr}&hydrate=team,probablePitcher,venue`;
   const data = await safeFetchJSON(url, `schedule ${dateStr}`);
   const games = (data && data.dates && data.dates[0] && data.dates[0].games) || [];
@@ -3614,7 +3638,14 @@ function init(){
   state.date = datePicker.value;
 
   datePicker.addEventListener('change', ()=>{ state.date = datePicker.value; loadSchedule(state.date); });
-  document.getElementById('refreshBtn').addEventListener('click', ()=> loadSchedule(state.date));
+  document.getElementById('refreshBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('refreshBtn');
+    btn.textContent = 'Refreshing…';
+    btn.disabled = true;
+    await loadSchedule(state.date);
+    btn.textContent = 'Refresh';
+    btn.disabled = false;
+  });
   document.getElementById('battingTeamSelect').addEventListener('change', onBattingTeamChange);
   document.getElementById('calcBtn').addEventListener('click', runCalculation);
   document.getElementById('savePickBtn').addEventListener('click', saveCurrentPick);
