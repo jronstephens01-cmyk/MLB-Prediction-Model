@@ -129,6 +129,24 @@
   .reliability-bar-fill{height:100%; border-radius:4px;}
   .reliability-detail{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); margin-top:4px;}
 
+  .roi-table{width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; margin-top:8px;}
+  .roi-table th{text-align:left; color:var(--chalk-dim); font-size:10px; text-transform:uppercase; padding:4px 6px; border-bottom:1px solid var(--line);}
+  .roi-table td{padding:8px 6px; border-bottom:1px solid var(--line);}
+  .roi-table tr:last-child td{border-bottom:none;}
+  .roi-table .profit{color:#7CC68A; font-weight:700;}
+  .roi-table .loss{color:var(--cold); font-weight:700;}
+  .roi-table .even{color:var(--mustard);}
+  .roi-table .dim{color:var(--chalk-dim);}
+  .track-row{padding:10px; border-bottom:1px solid var(--line);}
+  .track-row:last-child{border-bottom:none;}
+  .track-name{font-weight:700; font-size:13px;}
+  .track-meta{font-family:var(--mono); font-size:11px; color:var(--chalk-dim); margin-top:2px;}
+  .track-outcome{font-family:var(--mono); font-size:11px; margin-top:4px;}
+  .rec-badge{display:inline-block; font-family:var(--mono); font-size:10px; padding:1px 6px; border-radius:4px; margin-right:4px; border:1px solid var(--clay); color:var(--clay-2); background:rgba(193,80,46,0.12);}
+  .unit-win{color:#7CC68A; font-weight:700;}
+  .unit-loss{color:var(--cold); font-weight:700;}
+  .unit-neutral{color:var(--chalk-dim);}
+
   .bucket-row{display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid var(--line); font-size:13px;}
   .bucket-row:last-child{border-bottom:none;}
   .bucket-label{font-weight:700;}
@@ -221,7 +239,6 @@
   <button class="tab-btn" data-tab="parlay">Parlay</button>
   <button class="tab-btn" data-tab="lab">Props Lab</button>
   <button class="tab-btn" data-tab="tracking">Tracking</button>
-  <button class="tab-btn" data-tab="reliability">Reliability</button>
 </nav>
 
 <main>
@@ -620,51 +637,66 @@
 
   <!-- ============ TRACKING TAB ============ -->
   <div id="tab-tracking" style="display:none;">
-    <div class="panel">
-      <div class="panel-title">Pick Record</div>
-      <div class="record-bar">
-        <div><b id="recWins">0</b> Wins</div>
-        <div><b id="recLosses">0</b> Losses</div>
-        <div><b id="recPending">0</b> Pending</div>
-        <div><b id="recRate">--</b> Hit Rate</div>
+
+    <!-- Performance Header -->
+    <div class="panel" id="perfHeader">
+      <div class="panel-title">Model Performance</div>
+      <div class="panel-desc">Tracks every HR prop the model evaluated against a real sportsbook line — not just picks you liked. ROI counts only plays where we said Take (edge > 3pt). That's the only honest measure of whether the model beats the book.</div>
+      <button class="primary" id="trackAutoGradeBtn" style="width:100%; margin-bottom:10px;">Auto-Grade All Pending from Box Scores</button>
+      <div class="progress-text" id="trackGradeProgress"></div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+        <div class="stat-box" style="text-align:center;">
+          <div class="k">Recommended Record</div>
+          <div class="v" id="perfRecord" style="font-size:18px;">--</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);margin-top:2px;" id="perfHitRate">--</div>
+        </div>
+        <div class="stat-box" style="text-align:center;">
+          <div class="k">Units Profit / Loss</div>
+          <div class="v" id="perfROI" style="font-size:22px;">--</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);margin-top:2px;" id="perfROIPct">-- ROI</div>
+        </div>
+        <div class="stat-box" style="text-align:center;">
+          <div class="k">Break-Even Rate Needed</div>
+          <div class="v" id="perfBreakEven" style="font-size:18px;">--</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);margin-top:2px;">avg at offered odds</div>
+        </div>
+        <div class="stat-box" style="text-align:center;">
+          <div class="k">Full Board Tracked</div>
+          <div class="v" id="perfTotalTracked" style="font-size:18px;">--</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);margin-top:2px;" id="perfPending">-- pending</div>
+        </div>
       </div>
-      <div id="picksList"><div class="empty-state">No saved picks yet. Build a matchup in HR Props and save it.</div></div>
-    </div>
-  </div>
-
-  <!-- ============ RELIABILITY TAB ============ -->
-  <div id="tab-reliability" style="display:none;">
-    <div class="panel">
-      <div class="panel-title">Offered Props Log</div>
-      <div class="panel-desc">Every time you run Auto Scan with live lines loaded, every player the model evaluated against a real sportsbook line gets logged here automatically — not just the ones you saved. That's the full sample needed to actually prove (or disprove) whether the edge number means anything, instead of cherry-picking only the picks you liked.</div>
-      <button class="primary" id="gradeAllOfferedBtn" style="width:100%;">Grade All Pending</button>
-      <div class="progress-text" id="gradeAllProgress"></div>
     </div>
 
+    <!-- Edge Tier ROI breakdown -->
     <div class="panel">
-      <div class="panel-title">Overall Record</div>
-      <div class="record-bar">
-        <div><b id="relWins">0</b> Wins</div>
-        <div><b id="relLosses">0</b> Losses</div>
-        <div><b id="relPending">0</b> Pending</div>
-        <div><b id="relRate">--</b> Hit Rate</div>
+      <div class="panel-title">ROI by Edge Tier <small>does edge predict profit?</small></div>
+      <div class="panel-desc">This is the most important table. If Strong Edge plays (>7pt) are profitable and Small Edge plays are not, the edge calculation is working. Build to 20+ graded picks per tier before trusting the pattern.</div>
+      <div id="perfEdgeTiers"><div class="empty-state">Grade picks to see ROI by tier.</div></div>
+    </div>
+
+    <!-- Prop type breakdown -->
+    <div class="panel">
+      <div class="panel-title">ROI by Prop Type</div>
+      <div id="perfByType"><div class="empty-state">Grade picks to see ROI by type.</div></div>
+    </div>
+
+    <!-- Full pick log -->
+    <div class="panel">
+      <div class="panel-title">Full Tracked Log <small id="trackLogCount"></small></div>
+      <div class="lab-filter-row" id="trackFilterRow">
+        <button class="lab-filter-btn active" data-tfilter="all">All</button>
+        <button class="lab-filter-btn" data-tfilter="recommended">Recommended Only</button>
+        <button class="lab-filter-btn" data-tfilter="pending">Pending</button>
+        <button class="lab-filter-btn" data-tfilter="HR">HR</button>
+        <button class="lab-filter-btn" data-tfilter="K">K's</button>
+        <button class="lab-filter-btn" data-tfilter="OUTS">Outs</button>
+        <button class="lab-filter-btn" data-tfilter="WINNER">Winners</button>
       </div>
+      <div id="trackLog"></div>
     </div>
 
-    <div class="panel">
-      <div class="panel-title">Hit Rate By Edge <small>does a positive edge actually predict a win?</small></div>
-      <div id="edgeBucketTable"><div class="empty-state">Not enough graded picks yet.</div></div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-title">Hit Rate By Prop Type</div>
-      <div id="typeBucketTable"><div class="empty-state">Not enough graded picks yet.</div></div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-title">Full Log</div>
-      <div id="offeredPropsList"><div class="empty-state">Nothing logged yet — run Auto Scan with live lines loaded on any prop tab.</div></div>
-    </div>
   </div>
 
   <details class="debug">
@@ -757,7 +789,7 @@ let state = {
   statcastBatters: {},   // mlbamId -> {barrelRate, hardHitPct, exitVelo}
   statcastPitchers: {},  // mlbamId -> {barrelPctAllowed, hardHitPct}
   statcastLoaded: false,
-  platoonSplits: {},     // `${personId}_vr` / `_vl` -> {hr, pa, rate}
+  platoonSplits: {},     // keyed as personId_vr or personId_vl -> {hr, pa, rate}
   lineupCache: {},       // gamePk -> [{personId, battingOrder, position}]
   pitcherHands: {},      // personId -> 'R'|'L'
   hrScanByName: {}       // lowercase name -> {prob, gamePk, team, opp} — populated after HR scan
@@ -2421,104 +2453,10 @@ function saveCurrentPick(){
   renderPicks();
 }
 
-function renderPicks(){
-  const picks = loadPicks();
-  const wrap = document.getElementById('picksList');
-  let wins=0, losses=0, pending=0;
-  picks.forEach(p=>{ if(p.status==='win') wins++; else if(p.status==='loss') losses++; else if(p.status==='pending') pending++; });
-  document.getElementById('recWins').textContent = wins;
-  document.getElementById('recLosses').textContent = losses;
-  document.getElementById('recPending').textContent = pending;
-  const decided = wins+losses;
-  document.getElementById('recRate').textContent = decided ? pct(wins/decided) : '--';
-
-  if(!picks.length){
-    wrap.innerHTML = '<div class="empty-state">No saved picks yet. Build a matchup in any tab and save it.</div>';
-    return;
-  }
-  wrap.innerHTML = '';
-  picks.forEach(p=>{
-    const row = document.createElement('div');
-    row.className = 'pick-row';
-    const statusClass = p.status==='win' ? 'status-win' : (p.status==='loss' || p.status==='push') ? 'status-loss' : 'status-pending';
-    row.innerHTML = `
-      <div class="pick-main">
-        <div class="pick-name"><span class="type-chip">${p.propType}</span>${p.subject}</div>
-        <div class="pick-meta">${p.date} · ${p.detail} · ${pct(p.probability)} (${p.tag})</div>
-      </div>
-      <div style="display:flex; align-items:center; gap:6px;">
-        <span class="pick-status ${statusClass}">${p.status}</span>
-        ${p.status==='pending' ? `<button data-id="${p.id}" class="gradeBtn">Grade</button>` : ''}
-      </div>
-    `;
-    wrap.appendChild(row);
-  });
-  document.querySelectorAll('.gradeBtn').forEach(btn=>{
-    btn.addEventListener('click', ()=> gradePick(btn.dataset.id));
-  });
-}
-
-async function gradePick(id){
-  const picks = loadPicks();
-  const pick = picks.find(p=>p.id===id);
-  if(!pick || !pick.gamePk){
-    alert('No game data attached to this pick (was it built in Manual Mode?). Rebuild from a real game to enable auto-grading.');
-    return;
-  }
-  const url = `${API}/game/${pick.gamePk}/boxscore`;
-  const data = await safeFetchJSON(url, `boxscore ${pick.gamePk}`);
-  if(!data){ alert('Could not load box score yet — game may not be final.'); return; }
-
-  function findPlayer(){
-    let found = null;
-    ['home','away'].forEach(side=>{
-      const players = data.teams && data.teams[side] && data.teams[side].players;
-      if(!players) return;
-      Object.values(players).forEach(pl=>{
-        if(pick.subject.startsWith(pl.person.fullName)) found = pl;
-      });
-    });
-    return found;
-  }
-
-  if(pick.propType === 'HR'){
-    const pl = findPlayer();
-    const hr = pl && pl.stats && pl.stats.batting && pl.stats.batting.homeRuns;
-    if(hr == null){ alert('Could not find this batter in the box score (game may be in progress, or name match failed).'); return; }
-    pick.status = hr > 0 ? 'win' : 'loss';
-  }
-
-  else if(pick.propType === 'K'){
-    const pl = findPlayer();
-    const actualK = pl && pl.stats && pl.stats.pitching && pl.stats.pitching.strikeOuts;
-    if(actualK == null){ alert('Could not find this pitcher in the box score.'); return; }
-    if(actualK === pick.line) pick.status = 'push';
-    else if(pick.side === 'Over') pick.status = actualK > pick.line ? 'win' : 'loss';
-    else pick.status = actualK < pick.line ? 'win' : 'loss';
-  }
-
-  else if(pick.propType === 'OUTS'){
-    const pl = findPlayer();
-    const ip = pl && pl.stats && pl.stats.pitching && pl.stats.pitching.inningsPitched;
-    if(ip == null){ alert('Could not find this pitcher in the box score.'); return; }
-    const actualOuts = parseInningsToOuts(ip);
-    if(actualOuts === pick.line) pick.status = 'push';
-    else if(pick.side === 'Over') pick.status = actualOuts > pick.line ? 'win' : 'loss';
-    else pick.status = actualOuts < pick.line ? 'win' : 'loss';
-  }
-
-  else if(pick.propType === 'WINNER'){
-    const homeRuns = data.teams && data.teams.home && data.teams.home.teamStats && data.teams.home.teamStats.batting && data.teams.home.teamStats.batting.runs;
-    const awayRuns = data.teams && data.teams.away && data.teams.away.teamStats && data.teams.away.teamStats.batting && data.teams.away.teamStats.batting.runs;
-    if(homeRuns == null || awayRuns == null){ alert('Final score not available yet.'); return; }
-    if(homeRuns === awayRuns){ alert('Game tied/in progress — try again once final.'); return; }
-    const winnerSide = homeRuns > awayRuns ? 'Home' : 'Away';
-    pick.status = pick.side === winnerSide ? 'win' : 'loss';
-  }
-
-  savePicks(picks);
-  renderPicks();
-}
+// renderPicks and gradePick are now superseded by renderTracking/gradeLabProp.
+// These stubs keep any stray call sites from crashing.
+function renderPicks(){ renderTracking(); }
+async function gradePick(id){ gradeLabProp(id, 'win'); } // legacy — not used in new flow
 
 /* =========================================================================
    PARLAY BUILDER
@@ -2913,8 +2851,9 @@ let labFilter = 'all';
 function loadLabProps(){ try{ return JSON.parse(localStorage.getItem(LAB_KEY) || '[]'); }catch(e){ return []; } }
 function saveLabProps(props){ localStorage.setItem(LAB_KEY, JSON.stringify(props)); }
 
-// Called automatically when live odds are loaded. Captures all props where
-// model edge > threshold, keyed by player+date+propType+side to avoid duplicates.
+// Captures props to the lab. For HR: captures the FULL board (not just edge plays)
+// so we have calibration data for every evaluated matchup. The "recommended" flag marks
+// the plays we'd actually bet (edge > threshold). unitProfit is filled in on grading.
 function captureLabProps(marketSlug, propType, rows){
   const existing = loadLabProps();
   const keySet = new Set(existing.map(p=>p.key));
@@ -2922,18 +2861,21 @@ function captureLabProps(marketSlug, propType, rows){
 
   rows.forEach(row=>{
     if(!row.is_player_prop && propType !== 'WINNER') return;
+    if(!row.is_main_line && propType !== 'WINNER') return; // only main line props
     const modelProb = getModelProbForRow(propType, row);
     if(modelProb === null) return;
+
     const implied = row.odds_probability;
     const edge = modelProb - implied;
-    if(edge < 0.01) return; // only capture plays where we see at least a small edge
 
     const subject = row.player_name || row.selection || '?';
     const key = `${state.date}_${propType}_${subject}_${row.selection_type}_${row.line}`;
     if(keySet.has(key)) return;
     keySet.add(key);
 
-    const tier = edge >= 0.07 ? 'strong' : edge >= 0.04 ? 'medium' : 'small';
+    const tier = edge >= 0.07 ? 'strong' : edge >= 0.04 ? 'medium' : edge >= 0.01 ? 'small' : 'none';
+    const recommended = edge >= EDGE_TAKE_THRESHOLD;
+
     newProps.push({
       id: newId(), key,
       date: state.date,
@@ -2946,6 +2888,8 @@ function captureLabProps(marketSlug, propType, rows){
       modelProb,
       edge,
       tier,
+      recommended,   // true = we'd bet this, counts toward ROI
+      unitProfit: null, // filled in when graded: decimal payout - 1 on win, -1 on loss
       status: 'pending',
       gamePk: null
     });
@@ -2953,7 +2897,7 @@ function captureLabProps(marketSlug, propType, rows){
 
   if(newProps.length){
     saveLabProps([...existing, ...newProps]);
-    logDebug(`Props Lab: captured ${newProps.length} new edge plays (${propType})`, true);
+    logDebug(`Props Lab: captured ${newProps.length} props (${propType}) — ${newProps.filter(p=>p.recommended).length} recommended`, true);
   }
   return newProps.length;
 }
@@ -3117,10 +3061,16 @@ async function bulkGradeAllPending(){
         prop.status = p.side===winSide?'win':'loss'; graded++;
       }
     }
+    // Calculate unit profit on any newly graded pick
+    if(prop.status !== 'pending' && prop.unitProfit === undefined && prop.oddsAmerican != null){
+      const dec = americanToDecimal(prop.oddsAmerican);
+      prop.unitProfit = prop.status==='win' ? (dec-1) : prop.status==='loss' ? -1 : 0;
+    }
   });
 
   saveLabProps(props);
   renderLab();
+  renderTracking();
   alert(`Auto-graded ${graded} picks from box scores.${graded<pending.length?' Some games may not be final yet — run again later.':''}`);
 }
 
@@ -3203,9 +3153,17 @@ function renderLab(){
 function gradeLabProp(id, result){
   const props = loadLabProps();
   const prop = props.find(p=>p.id===id);
-  if(prop) prop.status = result;
+  if(prop){
+    prop.status = result;
+    // Calculate unit profit (assuming $1 unit per recommended bet)
+    if(prop.oddsAmerican != null){
+      const decimal = americanToDecimal(prop.oddsAmerican);
+      prop.unitProfit = result === 'win' ? (decimal - 1) : result === 'loss' ? -1 : 0;
+    }
+  }
   saveLabProps(props);
   renderLab();
+  renderTracking();
 }
 
 function renderLabReliability(allProps){
@@ -3384,6 +3342,249 @@ function renderHRPropsBoard(){
   });
 }
 
+/* =========================================================================
+   TRACKING — ROI-based performance dashboard
+   ========================================================================= */
+let trackFilter = 'all';
+
+function renderTracking(){
+  const allProps = loadLabProps();
+  const graded = allProps.filter(p=>p.status==='win'||p.status==='loss');
+  const recommended = allProps.filter(p=>p.recommended);
+  const recGraded = recommended.filter(p=>p.status==='win'||p.status==='loss');
+  const recWins = recGraded.filter(p=>p.status==='win');
+
+  // ── Header stats ────────────────────────────────────────────────────────
+  const recEl = document.getElementById('perfRecord');
+  const hitEl = document.getElementById('perfHitRate');
+  const roiEl = document.getElementById('perfROI');
+  const roiPctEl = document.getElementById('perfROIPct');
+  const beEl = document.getElementById('perfBreakEven');
+  const totEl = document.getElementById('perfTotalTracked');
+  const pendEl = document.getElementById('perfPending');
+
+  if(recEl) recEl.textContent = `${recWins.length}W–${recGraded.length-recWins.length}L`;
+  if(hitEl) hitEl.textContent = recGraded.length
+    ? `${pct(recWins.length/recGraded.length)} hit rate`
+    : 'no graded picks yet';
+
+  // ROI in units (only recommended plays)
+  const totalUnits = recGraded.reduce((s,p)=> s + (p.unitProfit||0), 0);
+  const roi = recGraded.length ? totalUnits / recGraded.length : null;
+  const roiColor = roi===null ? 'var(--chalk)' : roi > 0 ? '#7CC68A' : roi < 0 ? 'var(--cold)' : 'var(--mustard)';
+  if(roiEl){
+    roiEl.textContent = roi===null ? '--' : (totalUnits>=0?'+':'')+totalUnits.toFixed(2)+' u';
+    roiEl.style.color = roiColor;
+  }
+  if(roiPctEl){
+    roiPctEl.textContent = roi===null ? '-- ROI' : `${roi>=0?'+':''}${(roi*100).toFixed(1)}% ROI`;
+    roiPctEl.style.color = roiColor;
+  }
+
+  // Average break-even rate across recommended graded picks
+  const avgBE = recGraded.length
+    ? recGraded.reduce((s,p)=> s + (p.oddsAmerican ? 1/americanToDecimal(p.oddsAmerican) : 0.5), 0) / recGraded.length
+    : null;
+  if(beEl){
+    beEl.textContent = avgBE ? pct(avgBE) : '--';
+    // Color based on whether our hit rate beats break-even
+    if(avgBE && recGraded.length){
+      const hr = recWins.length/recGraded.length;
+      beEl.style.color = hr > avgBE ? '#7CC68A' : 'var(--cold)';
+    }
+  }
+  if(totEl) totEl.textContent = allProps.length;
+  if(pendEl) pendEl.textContent = `${allProps.filter(p=>p.status==='pending').length} pending`;
+
+  // ── Edge tier ROI table ──────────────────────────────────────────────────
+  const tierEl = document.getElementById('perfEdgeTiers');
+  if(tierEl){
+    const tiers = [
+      {key:'strong', label:'Strong (>7pt edge)', minEdge:0.07},
+      {key:'medium', label:'Medium (4–7pt edge)', minEdge:0.04},
+      {key:'small',  label:'Small (1–4pt edge)', minEdge:0.01},
+      {key:'none',   label:'No edge (tracked for calibration)', minEdge:-Infinity}
+    ];
+    const rows = tiers.map(t=>{
+      const picks = graded.filter(p=>p.tier===t.key);
+      if(!picks.length) return null;
+      const wins = picks.filter(p=>p.status==='win').length;
+      const units = picks.filter(p=>p.recommended).reduce((s,p)=>s+(p.unitProfit||0),0);
+      const recCount = picks.filter(p=>p.recommended).length;
+      const hitRate = wins/picks.length;
+      const avgBETier = picks.length
+        ? picks.reduce((s,p)=>s+(p.oddsAmerican?1/americanToDecimal(p.oddsAmerican):0.5),0)/picks.length
+        : null;
+      const profitable = units > 0;
+      return { label:t.label, total:picks.length, wins, hitRate, units, recCount, avgBE:avgBETier, profitable };
+    }).filter(Boolean);
+
+    if(!rows.length){
+      tierEl.innerHTML = '<div class="empty-state">Grade picks to see ROI by edge tier.</div>';
+    } else {
+      tierEl.innerHTML = `<table class="roi-table">
+        <tr><th>Edge Tier</th><th>W–L</th><th>Hit%</th><th>vs BE%</th><th>Units (rec)</th></tr>
+        ${rows.map(r=>`<tr>
+          <td>${r.label}</td>
+          <td>${r.wins}–${r.total-r.wins}</td>
+          <td class="${r.hitRate>=(r.avgBE||0.5)?'profit':'loss'}">${pct(r.hitRate)}</td>
+          <td class="${r.avgBE&&r.hitRate>r.avgBE?'profit':'loss'}">${r.avgBE?pct(r.avgBE):'--'}</td>
+          <td class="${r.units>0?'profit':r.units<0?'loss':'even'}">${r.recCount?((r.units>=0?'+':'')+r.units.toFixed(2)+' u ('+r.recCount+' bets)'):'n/a'}</td>
+        </tr>`).join('')}
+      </table>`;
+    }
+  }
+
+  // ── Prop type ROI table ──────────────────────────────────────────────────
+  const typeEl = document.getElementById('perfByType');
+  if(typeEl){
+    const types = ['HR','K','OUTS','WINNER'];
+    const rows = types.map(t=>{
+      const picks = graded.filter(p=>p.propType===t);
+      if(!picks.length) return null;
+      const wins = picks.filter(p=>p.status==='win').length;
+      const recPicks = picks.filter(p=>p.recommended);
+      const units = recPicks.reduce((s,p)=>s+(p.unitProfit||0),0);
+      return { label:t, total:picks.length, wins, hitRate:wins/picks.length, units, recCount:recPicks.length };
+    }).filter(Boolean);
+
+    if(!rows.length){
+      typeEl.innerHTML = '<div class="empty-state">Grade picks to see ROI by type.</div>';
+    } else {
+      typeEl.innerHTML = `<table class="roi-table">
+        <tr><th>Type</th><th>W–L</th><th>Hit%</th><th>Units (rec bets)</th></tr>
+        ${rows.map(r=>`<tr>
+          <td><span class="type-chip">${r.label}</span></td>
+          <td>${r.wins}–${r.total-r.wins}</td>
+          <td>${pct(r.hitRate)}</td>
+          <td class="${r.units>0?'profit':r.units<0?'loss':'even'}">${r.recCount?((r.units>=0?'+':'')+r.units.toFixed(2)+' u ('+r.recCount+' bets)'):'no recommended bets yet'}</td>
+        </tr>`).join('')}
+      </table>`;
+    }
+  }
+
+  // ── Full log ─────────────────────────────────────────────────────────────
+  const logEl = document.getElementById('trackLog');
+  const countEl = document.getElementById('trackLogCount');
+  if(!logEl) return;
+
+  let filtered = allProps;
+  if(trackFilter==='recommended') filtered = allProps.filter(p=>p.recommended);
+  else if(trackFilter==='pending') filtered = allProps.filter(p=>p.status==='pending');
+  else if(['HR','K','OUTS','WINNER'].includes(trackFilter)) filtered = allProps.filter(p=>p.propType===trackFilter);
+  filtered = [...filtered].sort((a,b)=>new Date(b.date)-new Date(a.date)||b.edge-a.edge);
+  if(countEl) countEl.textContent = `${filtered.length} of ${allProps.length}`;
+
+  if(!filtered.length){ logEl.innerHTML = '<div class="empty-state">No props match this filter.</div>'; return; }
+  logEl.innerHTML = '';
+  filtered.slice(0,100).forEach(p=>{
+    const statusColor = p.status==='win'?'#7CC68A':p.status==='loss'?'var(--cold)':p.status==='push'?'var(--mustard)':'var(--chalk-dim)';
+    const unitStr = p.unitProfit!=null && p.recommended
+      ? `<span class="${p.unitProfit>0?'unit-win':p.unitProfit<0?'unit-loss':'unit-neutral'}">${p.unitProfit>=0?'+':''}${p.unitProfit.toFixed(2)}u</span>`
+      : '';
+    const row = document.createElement('div');
+    row.className = 'track-row';
+    row.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div>
+          <div class="track-name">
+            <span class="type-chip">${p.propType}</span>
+            ${p.recommended?'<span class="rec-badge">BET</span>':''}
+            ${p.subject}
+          </div>
+          <div class="track-meta">${p.date} · ${p.matchup} · ${p.detail}</div>
+          <div class="track-meta">${p.sportsbook} ${p.oddsAmerican>0?'+':''}${p.oddsAmerican} · impl ${pct(p.impliedProb)} · model ${pct(p.modelProb)} · edge ${p.edge>=0?'+':''}${(p.edge*100).toFixed(1)}pt</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:${statusColor};">${p.status}</div>
+          <div style="margin-top:4px;">${unitStr}</div>
+          ${p.status==='pending'?`<div style="margin-top:6px;display:flex;gap:4px;">
+            <button class="tGradeW" data-id="${p.id}" style="font-size:10px;padding:3px 7px;">W</button>
+            <button class="tGradeL" data-id="${p.id}" style="font-size:10px;padding:3px 7px;">L</button>
+            <button class="tGradeP" data-id="${p.id}" style="font-size:10px;padding:3px 7px;">Push</button>
+          </div>`:''}
+        </div>
+      </div>
+    `;
+    logEl.appendChild(row);
+  });
+
+  document.querySelectorAll('.tGradeW').forEach(btn=>btn.addEventListener('click',()=>gradeLabProp(btn.dataset.id,'win')));
+  document.querySelectorAll('.tGradeL').forEach(btn=>btn.addEventListener('click',()=>gradeLabProp(btn.dataset.id,'loss')));
+  document.querySelectorAll('.tGradeP').forEach(btn=>btn.addEventListener('click',()=>gradeLabProp(btn.dataset.id,'push')));
+}
+
+// Auto-grade on page load — silently attempts to grade any pending picks from past dates
+async function autoGradeOnLoad(){
+  const props = loadLabProps();
+  const pastPending = props.filter(p=>p.status==='pending' && p.date < state.date);
+  if(!pastPending.length) return;
+  const gamePks = [...new Set(pastPending.map(p=>p.gamePk).filter(Boolean))];
+  if(!gamePks.length) return;
+  logDebug(`Auto-grading ${pastPending.length} pending picks from past dates…`);
+  let graded = 0;
+  const boxScores = {};
+  await Promise.all(gamePks.map(async pk=>{
+    const data = await safeFetchJSON(`${API}/game/${pk}/boxscore`, `auto-grade boxscore ${pk}`);
+    if(data) boxScores[pk] = data;
+  }));
+  pastPending.forEach(p=>{
+    if(!p.gamePk || !boxScores[p.gamePk]) return;
+    const data = boxScores[p.gamePk];
+    const prop = props.find(x=>x.id===p.id);
+    if(!prop) return;
+    const findPlayer = ()=>{
+      let found = null;
+      ['home','away'].forEach(side=>{
+        const players = data.teams?.[side]?.players;
+        if(!players) return;
+        Object.values(players).forEach(pl=>{
+          if(p.subject.startsWith(pl.person.fullName)) found = pl;
+        });
+      });
+      return found;
+    };
+    let newStatus = null;
+    if(p.propType==='HR'){
+      const pl = findPlayer();
+      const hr = pl?.stats?.batting?.homeRuns;
+      if(hr!=null) newStatus = hr>0?'win':'loss';
+    } else if(p.propType==='K'){
+      const pl = findPlayer();
+      const k = pl?.stats?.pitching?.strikeOuts;
+      if(k!=null && p.line!=null) newStatus = k===p.line?'push':p.side==='Over'?k>p.line?'win':'loss':k<p.line?'win':'loss';
+    } else if(p.propType==='OUTS'){
+      const pl = findPlayer();
+      const ip = pl?.stats?.pitching?.inningsPitched;
+      if(ip!=null && p.line!=null){ const o=parseInningsToOuts(ip); newStatus=o===p.line?'push':p.side==='Over'?o>p.line?'win':'loss':o<p.line?'win':'loss'; }
+    } else if(p.propType==='WINNER'){
+      const hr=data.teams?.home?.teamStats?.batting?.runs;
+      const ar=data.teams?.away?.teamStats?.batting?.runs;
+      if(hr!=null&&ar!=null&&hr!==ar){ const ws=hr>ar?'Home':'Away'; newStatus=p.side===ws?'win':'loss'; }
+    }
+    if(newStatus){
+      prop.status = newStatus;
+      if(prop.oddsAmerican!=null){
+        const dec = americanToDecimal(prop.oddsAmerican);
+        prop.unitProfit = newStatus==='win'?(dec-1):newStatus==='loss'?-1:0;
+      }
+      graded++;
+    }
+  });
+  if(graded){ saveLabProps(props); logDebug(`Auto-graded ${graded} picks on load`, true); }
+}
+
+function wireTrackFilters(){
+  document.querySelectorAll('[data-tfilter]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('[data-tfilter]').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      trackFilter = btn.dataset.tfilter;
+      renderTracking();
+    });
+  });
+}
+
 function wireTabs(){
   document.querySelectorAll('.tab-btn').forEach(btn=>{
     if(btn.disabled) return;
@@ -3394,7 +3595,7 @@ function wireTabs(){
         const el = document.getElementById('tab-'+t);
         if(el) el.style.display = (t === btn.dataset.tab) ? 'block' : 'none';
       });
-      if(btn.dataset.tab === 'tracking') renderPicks();
+      if(btn.dataset.tab === 'tracking') renderTracking();
       if(btn.dataset.tab === 'parlay') renderParlay();
       if(btn.dataset.tab === 'lab') renderLab();
     });
@@ -3501,11 +3702,21 @@ function init(){
     alert('Cleared all graded props.');
   });
 
+  document.getElementById('trackAutoGradeBtn').addEventListener('click', async ()=>{
+    document.getElementById('trackGradeProgress').textContent = 'Grading…';
+    await bulkGradeAllPending();
+    document.getElementById('trackGradeProgress').textContent = '';
+  });
+
   loadSchedule(state.date);
-  renderPicks();
   renderParlay();
   wireLabFilters();
+  wireTrackFilters();
   renderLab();
+  renderTracking();
+
+  // Auto-grade past pending picks silently on load
+  autoGradeOnLoad().then(()=>{ renderTracking(); renderLab(); });
 }
 
 init();
