@@ -300,6 +300,7 @@
   <button class="tab-btn" data-tab="parlay">Parlay</button>
   <button class="tab-btn" data-tab="lab">Props Lab</button>
   <button class="tab-btn" data-tab="tracking">Tracking</button>
+  <button class="tab-btn" data-tab="ai">AI Analyst</button>
   <button class="tab-btn" data-tab="paytab">Pay The Tab</button>
 </nav>
 
@@ -804,6 +805,36 @@
     </div>
   </div>
 
+  <!-- ============ AI ANALYST TAB ============ -->
+  <div id="tab-ai" style="display:none;">
+
+    <div class="panel">
+      <div class="panel-title">AI Analyst</div>
+      <div class="panel-desc">Claude reads your entire graded pick history and tells you straight: is this model actually beating the book, which prop types are making money, where the probabilities are off, and exactly what to focus on. Gets smarter as you grade more picks — needs at least 10 graded to say anything meaningful, 50+ to be confident.</div>
+      <button class="primary" id="aiAnalyzeBtn" style="width:100%; font-size:15px; padding:12px;">Run AI Analysis</button>
+      <div class="progress-text" id="aiStatus"></div>
+    </div>
+
+    <div class="panel" id="aiResultPanel" style="display:none;">
+      <div class="panel-title">Analysis <small id="aiTimestamp"></small></div>
+      <div id="aiAnalysisResult"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Cloud Sync <small>auto-grades picks nightly</small></div>
+      <div class="panel-desc">Every pick you capture gets synced to the cloud. The cron job runs at 2 AM PT every night, fetches box scores for all that day's games, and grades every pending pick automatically. You never have to manually grade anything.</div>
+      <div class="odds-status" id="kvSyncStatus">Connecting…</div>
+      <button class="ghost" id="kvSyncNowBtn" style="width:100%; margin-top:8px;">Force Sync Now</button>
+      <div class="stat-grid" style="margin-top:10px;">
+        <div class="stat-box"><div class="k">Synced Picks</div><div class="v" id="kvPickCount">--</div></div>
+        <div class="stat-box"><div class="k">Last Auto-Grade</div><div class="v" id="kvLastGrade">--</div></div>
+        <div class="stat-box"><div class="k">Cloud ROI</div><div class="v" id="kvROI">--</div></div>
+        <div class="stat-box"><div class="k">Cloud Units</div><div class="v" id="kvUnits">--</div></div>
+      </div>
+    </div>
+
+  </div>
+
   <!-- ============ PAY THE TAB TAB ============ -->
   <div id="tab-paytab" style="display:none;">
 
@@ -967,6 +998,7 @@ const ODDS_PROXY = "https://mlb-odds-proxy.jronstephens01.workers.dev/odds/api/v
 const PROP_MARKET = { HR:'player_home_runs', K:'player_strikeouts', OUTS:'player_pitching_outs' };
 const TOTAL_MARKET = 'totals';
 const EDGE_TAKE_THRESHOLD = 0.03;
+const WORKER_BASE = 'https://mlb-odds-proxy.jronstephens01.workers.dev';
 
 /* =========================================================================
    STATE
@@ -3407,6 +3439,7 @@ function gradeLabProp(id, result){
   saveLabProps(props);
   renderLab();
   renderTracking();
+  syncTodayPicksToKV();
 }
 
 function renderLabReliability(allProps){
@@ -4298,7 +4331,7 @@ async function projectGameOUTotal(g){
     oddsRow: gameOURow || null,
     tag: totalProj > 9 ? { color:'var(--clay-2)', label:'High-scoring' } :
          totalProj > 8 ? { color:'var(--mustard)', label:'Average' } :
-                          { color:colorCold||'#5e78a4', label:'Pitcher\'s game' }
+                          { color:'#5e78a4', label:"Pitcher's game" }
   };
 }
 
@@ -4553,13 +4586,147 @@ function wireStreakFilters(){
   });
 }
 
+/* =========================================================================
+   CLOUD SYNC — KV storage via Cloudflare Worker
+   ========================================================================= */
+async function syncFromKV(){
+  const statusEl = document.getElementById('kvSyncStatus');
+  if(statusEl) statusEl.textContent = 'Syncing…';
+  try{
+    const since = new Date(); since.setDate(since.getDate()-60);
+    const sinceStr = since.toISOString().split('T')[0];
+    const res = await fetch(`${WORKER_BASE}/picks/sync?since=${sinceStr}`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const kvData = await res.json();
+
+    const localProps = loadLabProps();
+    let updated = 0;
+
+    Object.entries(kvData).forEach(([date, kvPicks])=>{
+      kvPicks.forEach(kv=>{
+        const local = localProps.find(p=>p.id===kv.id);
+        if(local){
+          // KV wins for graded status — it has the authoritative auto-graded result
+          if(kv.status !== 'pending' && local.status === 'pending'){
+            local.status = kv.status;
+            local.unitProfit = kv.unitProfit;
+            local.gradedAt = kv.gradedAt;
+            updated++;
+          }
+        } else if(kv.date && kv.date < state.date){
+          // Pick in cloud but not local (different device, or local cleared)
+          localProps.push(kv);
+          updated++;
+        }
+      });
+    });
+
+    if(updated > 0){
+      saveLabProps(localProps);
+      logDebug(`KV sync: updated ${updated} picks from cloud`, true);
+      renderTracking(); renderLab();
+    }
+
+    if(statusEl) statusEl.textContent = `Synced — ${Object.values(kvData).flat().length} picks in cloud · ${updated > 0 ? updated + ' newly graded' : 'all up to date'}`;
+
+    // Also fetch cloud performance summary
+    loadKVStats();
+    return true;
+  }catch(e){
+    logDebug(`KV sync failed: ${e.message}`, false);
+    if(statusEl) statusEl.textContent = `Sync unavailable (${e.message}) — using local data`;
+    return false;
+  }
+}
+
+async function loadKVStats(){
+  try{
+    const res = await fetch(`${WORKER_BASE}/picks/stats`);
+    if(!res.ok) return;
+    const stats = await res.json();
+    const countEl = document.getElementById('kvPickCount');
+    const lastEl = document.getElementById('kvLastGrade');
+    const roiEl = document.getElementById('kvROI');
+    const unitsEl = document.getElementById('kvUnits');
+    if(countEl) countEl.textContent = stats.totalGraded || 0;
+    if(lastEl) lastEl.textContent = stats.lastUpdated ? new Date(stats.lastUpdated).toLocaleDateString() : 'Never';
+    const roi = stats.totalRecommended > 0 ? (stats.totalUnits/stats.totalRecommended*100) : null;
+    if(roiEl){ roiEl.textContent = roi !== null ? `${roi>=0?'+':''}${roi.toFixed(1)}%` : '--'; roiEl.style.color = roi > 0 ? '#7CC68A' : roi < 0 ? 'var(--cold)' : 'var(--chalk)'; }
+    if(unitsEl){ unitsEl.textContent = stats.totalUnits != null ? `${stats.totalUnits>=0?'+':''}${stats.totalUnits.toFixed(2)}u` : '--'; unitsEl.style.color = stats.totalUnits >= 0 ? '#7CC68A' : 'var(--cold)'; }
+  }catch(e){}
+}
+
+async function pushToKV(date, picks){
+  if(!picks || !picks.length) return;
+  try{
+    await fetch(`${WORKER_BASE}/picks/save`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({date, picks})
+    });
+  }catch(e){ logDebug(`KV push failed: ${e.message}`, false); }
+}
+
+// Push today's lab props to KV whenever we capture or grade
+function syncTodayPicksToKV(){
+  const todayPicks = loadLabProps().filter(p=>p.date===state.date);
+  if(todayPicks.length) pushToKV(state.date, todayPicks);
+}
+
+/* =========================================================================
+   AI ANALYST — calls Claude via Worker agent endpoint
+   ========================================================================= */
+async function runAIAnalysis(){
+  const btn = document.getElementById('aiAnalyzeBtn');
+  const resultPanel = document.getElementById('aiResultPanel');
+  const resultEl = document.getElementById('aiAnalysisResult');
+  const statusEl = document.getElementById('aiStatus');
+  const tsEl = document.getElementById('aiTimestamp');
+  btn.disabled = true; btn.textContent = 'Analyzing…';
+  statusEl.textContent = 'Reading graded pick history and calling Claude…';
+  resultPanel.style.display = 'block';
+  resultEl.innerHTML = '<div class="empty-state">Running…</div>';
+
+  try{
+    const res = await fetch(`${WORKER_BASE}/agent/analyze`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    if(data.error){
+      resultEl.innerHTML = `<div class="no-lines-notice">⚠️ ${data.error}</div>`;
+    } else {
+      const text = (data.analysis||'')
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/\n/g,'<br>')
+        .replace(/\*\*(.*?)\*\*/g,'<b>$1</b>')
+        .replace(/^(\d+\.\s)/gm,'<br><b>$1</b>');
+
+      resultEl.innerHTML = `
+        ${data.meta ? `<div class="stat-grid" style="margin-bottom:14px;">
+          <div class="stat-box"><div class="k">Graded Picks</div><div class="v">${data.meta.graded}</div></div>
+          <div class="stat-box"><div class="k">Recommended</div><div class="v">${data.meta.recommended}</div></div>
+          <div class="stat-box"><div class="k">ROI</div><div class="v" style="color:${parseFloat(data.meta.roi||0)>=0?'#7CC68A':'var(--cold)'};">${data.meta.roi}%</div></div>
+          <div class="stat-box"><div class="k">Units P&L</div><div class="v" style="color:${parseFloat(data.meta.units||0)>=0?'#7CC68A':'var(--cold)'};">${parseFloat(data.meta.units||0)>=0?'+':''}${data.meta.units}u</div></div>
+        </div>` : ''}
+        <div style="font-family:var(--body);font-size:13px;line-height:1.75;color:var(--chalk);">${text}</div>
+      `;
+      if(tsEl) tsEl.textContent = new Date().toLocaleTimeString();
+    }
+    statusEl.textContent = '';
+  }catch(e){
+    resultEl.innerHTML = `<div class="no-lines-notice">Analysis failed: ${e.message}. Check that ANTHROPIC_API_KEY is added to your Worker secrets.</div>`;
+    statusEl.textContent = '';
+  }
+  btn.disabled = false; btn.textContent = 'Run AI Analysis';
+}
+
 function wireTabs(){
   document.querySelectorAll('.tab-btn').forEach(btn=>{
     if(btn.disabled) return;
     btn.addEventListener('click', ()=>{
       document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
-      ['hr','ks','outs','winners','ou','streak','parlay','lab','tracking','paytab'].forEach(t=>{
+      ['hr','ks','outs','winners','ou','streak','parlay','lab','tracking','ai','paytab'].forEach(t=>{
         const el = document.getElementById('tab-'+t);
         if(el) el.style.display = (t === btn.dataset.tab) ? 'block' : 'none';
       });
@@ -4568,6 +4735,7 @@ function wireTabs(){
       if(btn.dataset.tab === 'lab') renderLab();
       if(btn.dataset.tab === 'paytab') renderPTCards();
       if(btn.dataset.tab === 'streak') renderStreakTab();
+      if(btn.dataset.tab === 'ai'){ loadKVStats(); }
     });
   });
 }
@@ -4702,6 +4870,10 @@ function init(){
 
   initPayTab();
 
+  // AI Analyst + KV sync
+  document.getElementById('aiAnalyzeBtn').addEventListener('click', runAIAnalysis);
+  document.getElementById('kvSyncNowBtn').addEventListener('click', syncFromKV);
+
   loadSchedule(state.date);
   renderParlay();
   wireLabFilters();
@@ -4711,6 +4883,9 @@ function init(){
 
   // Auto-grade past pending picks silently on load
   autoGradeOnLoad().then(()=>{ renderTracking(); renderLab(); });
+
+  // Cloud sync — runs silently, updates local data with any overnight auto-grades
+  syncFromKV().then(()=>{ syncTodayPicksToKV(); });
 }
 
 init();
