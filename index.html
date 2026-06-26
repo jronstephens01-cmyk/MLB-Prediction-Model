@@ -147,6 +147,26 @@
   .unit-loss{color:var(--cold); font-weight:700;}
   .unit-neutral{color:var(--chalk-dim);}
 
+  /* Pay The Tab */
+  .pt-card-row{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid var(--line);cursor:pointer;}
+  .pt-card-row:last-child{border-bottom:none;}
+  .pt-card-row:hover{background:rgba(244,241,234,0.04);}
+  .pt-card-main{flex:1;}
+  .pt-card-name{font-weight:700;font-size:14px;}
+  .pt-card-meta{font-family:var(--mono);font-size:11px;color:var(--chalk-dim);margin-top:2px;}
+  .pt-card-balance{font-family:var(--mono);font-weight:700;font-size:16px;color:var(--clay-2);}
+  .pt-card-apr{font-family:var(--mono);font-size:11px;color:var(--chalk-dim);}
+  .pt-parlay-leg{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:10px;border-bottom:1px solid var(--line);}
+  .pt-parlay-leg:last-child{border-bottom:none;}
+  .pt-leg-name{font-weight:700;font-size:13px;}
+  .pt-leg-meta{font-family:var(--mono);font-size:11px;color:var(--chalk-dim);margin-top:2px;}
+  .pt-leg-odds{font-family:var(--mono);font-weight:700;font-size:15px;color:#7CC68A;text-align:right;flex-shrink:0;}
+  .pt-payout-box{background:linear-gradient(135deg,rgba(124,198,138,0.15),rgba(232,163,61,0.08));border:1px solid #7CC68A;border-radius:10px;padding:14px;margin-top:10px;}
+  .pt-payout-label{font-family:var(--mono);font-size:10px;color:var(--chalk-dim);text-transform:uppercase;letter-spacing:1px;}
+  .pt-payout-amount{font-family:var(--display);font-size:28px;text-transform:uppercase;color:#7CC68A;margin:4px 0;}
+  .pt-payout-meta{font-family:var(--mono);font-size:11px;color:var(--chalk-dim);}
+  .pt-warning-box{background:rgba(193,80,46,0.12);border:1px solid var(--clay);border-radius:8px;padding:10px;margin-top:8px;font-family:var(--mono);font-size:12px;color:var(--clay-2);}
+
   .bucket-row{display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid var(--line); font-size:13px;}
   .bucket-row:last-child{border-bottom:none;}
   .bucket-label{font-weight:700;}
@@ -703,53 +723,77 @@
   <!-- ============ PAY THE TAB TAB ============ -->
   <div id="tab-paytab" style="display:none;">
 
+    <!-- Card Stack -->
     <div class="panel">
-      <div class="panel-title">Pay The Tab</div>
-      <div class="panel-desc">The minimum payment is built to keep you in debt — most of it is interest. The trick is to lock in a fixed payment each month (never letting it shrink as the balance drops) and throw betting winnings on top. Enter your card below and see how many months and how much interest you cut.</div>
+      <div class="panel-title">My Cards <small id="ptTotalDebt"></small></div>
+      <div class="panel-desc">Your active cards. Crossed-out ones are paid off. Tap a card to edit it.</div>
+      <div id="ptCardList"></div>
+      <button class="ghost" id="ptAddCardBtn" style="width:100%; margin-top:10px;">+ Add Card</button>
+    </div>
 
-      <div class="field-row">
-        <label>Card Nickname (optional)</label>
-        <input type="text" id="ptName" placeholder="e.g. Chase Freedom">
+    <!-- Add / Edit Card Form -->
+    <div class="panel" id="ptCardForm" style="display:none;">
+      <div class="panel-title" id="ptFormTitle">Add Card</div>
+      <input type="hidden" id="ptEditId">
+      <div class="field-row"><label>Card Name</label><input type="text" id="ptName" placeholder="e.g. Cap 1"></div>
+      <div class="two-col">
+        <div class="field-row"><label>Payoff Balance ($)</label><input type="number" id="ptBalance" placeholder="1616.87" step="0.01"></div>
+        <div class="field-row"><label>APR (%)</label><input type="number" id="ptAPR" placeholder="28.49" step="0.01"></div>
       </div>
       <div class="two-col">
-        <div class="field-row">
-          <label>Current Balance ($)</label>
-          <input type="number" id="ptBalance" placeholder="3500" step="50">
-        </div>
-        <div class="field-row">
-          <label>APR (%)</label>
-          <input type="number" id="ptAPR" placeholder="24.99" step="0.01">
-        </div>
+        <div class="field-row"><label>Monthly Minimum ($)</label><input type="number" id="ptMinPayment" placeholder="101" step="1"></div>
+        <div class="field-row"><label>Credit Limit ($)</label><input type="number" id="ptLimit" placeholder="3000" step="50"></div>
+      </div>
+      <div class="two-col" style="margin-top:4px;">
+        <button class="primary" id="ptSaveCardBtn">Save Card</button>
+        <button class="ghost" id="ptCancelCardBtn">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Payoff Parlay Builder -->
+    <div class="panel">
+      <div class="panel-title">🎯 Build a Payoff Parlay</div>
+      <div class="panel-desc">Pick a card to pay off, enter how much you want to bet (your minimum or more), and we'll build a parlay from today's live HR props with enough combined odds to clear the balance. Load live HR lines first for real picks.</div>
+
+      <div class="field-row">
+        <label>Card to Pay Off</label>
+        <select id="ptCardSelect"><option value="">-- Select a card --</option></select>
       </div>
       <div class="two-col">
-        <div class="field-row">
-          <label>Your Fixed Monthly Payment ($)</label>
-          <input type="number" id="ptPayment" placeholder="200" step="10">
-        </div>
-        <div class="field-row">
-          <label>Min Payment (optional, for compare)</label>
-          <input type="number" id="ptMinPayment" placeholder="70" step="5">
-        </div>
+        <div class="field-row"><label>Your Bet ($)</label><input type="number" id="ptBetAmount" placeholder="101" step="1"></div>
+        <div class="field-row"><label>Target Payout ($)</label><input type="number" id="ptTargetPayout" placeholder="1616.87" step="0.01"></div>
       </div>
-      <div class="field-row">
-        <label>Avg Monthly Betting Winnings to Add ($) — optional</label>
-        <input type="number" id="ptWinnings" placeholder="0" step="10" value="0">
-      </div>
+      <div class="panel-desc" id="ptMultiplierNeeded" style="color:var(--mustard);"></div>
+      <button class="primary" id="ptBuildParlayBtn" style="width:100%;">Build Payoff Parlay from Today's Props</button>
+      <div id="ptParlayResult"></div>
+    </div>
 
+    <!-- Monthly Grind Calculator -->
+    <div class="panel">
+      <div class="panel-title">Monthly Grind Calculator</div>
+      <div class="panel-desc">The boring (but reliable) path. Lock in a fixed payment every month and add betting wins on top. Never let the payment shrink as the balance drops — that's how minimums trap you forever.</div>
+      <div class="field-row">
+        <label>Card</label>
+        <select id="ptCalcCardSelect"><option value="">-- Select a card --</option></select>
+      </div>
+      <div class="two-col">
+        <div class="field-row"><label>Fixed Monthly Payment ($)</label><input type="number" id="ptPayment" placeholder="200" step="10"></div>
+        <div class="field-row"><label>Avg Monthly Winnings to Add ($)</label><input type="number" id="ptWinnings" placeholder="0" step="10" value="0"></div>
+      </div>
       <button class="primary" id="ptCalcBtn" style="width:100%;">Calculate Payoff</button>
     </div>
 
     <div class="panel" id="ptResultPanel" style="display:none;">
-      <div class="panel-title">Payoff Plan</div>
+      <div class="panel-title">Payoff Plan <small id="ptResultCardName"></small></div>
       <div class="readout">
         <div class="readout-label">Debt-Free In</div>
         <div class="readout-number" id="ptMonths">--</div>
         <div class="readout-tag" id="ptPayoffDate">—</div>
         <div class="stat-grid">
-          <div class="stat-box"><div class="k">Total Interest Paid</div><div class="v" id="ptInterest">--</div></div>
+          <div class="stat-box"><div class="k">Total Interest</div><div class="v" id="ptInterest">--</div></div>
           <div class="stat-box"><div class="k">Total Paid</div><div class="v" id="ptTotal">--</div></div>
           <div class="stat-box"><div class="k">Monthly Interest (now)</div><div class="v" id="ptMonthlyInt">--</div></div>
-          <div class="stat-box"><div class="k">First Payment to Principal</div><div class="v" id="ptPrincipal">--</div></div>
+          <div class="stat-box"><div class="k">First Month to Principal</div><div class="v" id="ptPrincipal">--</div></div>
         </div>
         <div id="ptWarning"></div>
       </div>
@@ -3683,170 +3727,409 @@ function wireTrackFilters(){
 // Simulates month-by-month amortization. Returns months to payoff, total
 // interest, and a schedule. Caps at 1200 months (100yr) to avoid infinite loop
 // when payment doesn't cover interest.
-function simulatePayoff(balance, apr, monthlyPayment, extraPerMonth){
-  const monthlyRate = (apr/100)/12;
-  let bal = balance;
-  let months = 0;
-  let totalInterest = 0;
-  let firstInterest = null, firstPrincipal = null;
-  const MAX = 1200;
+/* =========================================================================
+   PAY THE TAB v2 — multi-card manager + payoff parlay builder
+   ========================================================================= */
+const PAYTAB_KEY = 'mlb_paytab_cards';
 
-  while(bal > 0.01 && months < MAX){
-    const interest = bal * monthlyRate;
-    if(months === 0) firstInterest = interest;
-    const pay = monthlyPayment + (extraPerMonth||0);
-    // If payment doesn't even cover interest, it'll never pay off
-    if(pay <= interest && months === 0){
-      return { neverPaysOff:true, monthlyInterest:interest };
-    }
-    const principal = pay - interest;
-    if(months === 0) firstPrincipal = principal;
-    bal = bal + interest - pay;
-    totalInterest += interest;
-    months++;
-    if(bal < 0) bal = 0;
-  }
-  return {
-    neverPaysOff: months >= MAX,
-    months, totalInterest,
-    totalPaid: balance + totalInterest,
-    monthlyInterest: firstInterest,
-    firstPrincipal
-  };
+// Default cards pre-loaded from user's actual card data
+const PT_DEFAULT_CARDS = [
+  { id:'pt1', name:'Cap 1',         balance:1616.87, apr:28.49, minPayment:101,  limit:3000  },
+  { id:'pt2', name:'Apple Card',    balance:2623.60, apr:25.49, minPayment:98,   limit:2750  },
+  { id:'pt3', name:'PayPal',        balance:4259.99, apr:29.89, minPayment:100,  limit:4500  },
+  { id:'pt4', name:'GM Card/Barclay', balance:6526.60, apr:19.40, minPayment:185, limit:7500 },
+  { id:'pt5', name:'Best Egg',      balance:18231.09, apr:15.92, minPayment:1106, limit:null }
+];
+
+function loadPTCards(){
+  try{
+    const saved = JSON.parse(localStorage.getItem(PAYTAB_KEY) || 'null');
+    if(saved && Array.isArray(saved)) return saved;
+  }catch(e){}
+  // First load — seed with user's real cards
+  savePTCards(PT_DEFAULT_CARDS);
+  return PT_DEFAULT_CARDS;
 }
+function savePTCards(cards){ localStorage.setItem(PAYTAB_KEY, JSON.stringify(cards)); }
+function newPTId(){ return 'pt'+Date.now(); }
 
 function fmtMoney(n){
-  return '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 function monthsToText(m){
-  if(m < 12) return `${m} month${m!==1?'s':''}`;
-  const yrs = Math.floor(m/12), rem = m%12;
-  return `${yrs}y ${rem}m`;
+  if(m<12) return `${m} month${m!==1?'s':''}`;
+  const yrs=Math.floor(m/12), rem=m%12;
+  return rem ? `${yrs}y ${rem}m` : `${yrs} year${yrs!==1?'s':''}`;
 }
 function payoffDateText(months){
-  const d = new Date();
-  d.setMonth(d.getMonth() + months);
-  return d.toLocaleDateString('en-US', {month:'long', year:'numeric'});
+  const d=new Date(); d.setMonth(d.getMonth()+months);
+  return d.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+}
+function tagColorForPayoff(m){
+  return m<=12?'#7CC68A':m<=36?'var(--mustard)':'var(--clay-2)';
 }
 
-function runPayoffCalc(){
-  const name = document.getElementById('ptName').value.trim();
-  const balance = parseFloat(document.getElementById('ptBalance').value);
-  const apr = parseFloat(document.getElementById('ptAPR').value);
-  const payment = parseFloat(document.getElementById('ptPayment').value);
-  const minPayment = parseFloat(document.getElementById('ptMinPayment').value);
-  const winnings = parseFloat(document.getElementById('ptWinnings').value) || 0;
+function simulatePayoff(balance, apr, monthlyPayment, extraPerMonth){
+  const monthlyRate=(apr/100)/12;
+  let bal=balance, months=0, totalInterest=0, firstInterest=null, firstPrincipal=null;
+  const MAX=1200;
+  while(bal>0.01 && months<MAX){
+    const interest=bal*monthlyRate;
+    if(months===0) firstInterest=interest;
+    const pay=monthlyPayment+(extraPerMonth||0);
+    if(pay<=interest && months===0) return {neverPaysOff:true, monthlyInterest:interest};
+    const principal=pay-interest;
+    if(months===0) firstPrincipal=principal;
+    bal=bal+interest-pay; totalInterest+=interest; months++;
+    if(bal<0) bal=0;
+  }
+  return {neverPaysOff:months>=MAX, months, totalInterest, totalPaid:balance+totalInterest,
+    monthlyInterest:firstInterest, firstPrincipal};
+}
 
-  if(isNaN(balance) || isNaN(apr) || isNaN(payment) || balance<=0 || payment<=0){
-    alert('Enter at least a balance, APR, and your fixed monthly payment.');
+/* ── Card list UI ─────────────────────────────────────────────────────────── */
+function renderPTCards(){
+  const cards = loadPTCards();
+  const list = document.getElementById('ptCardList');
+  const totalDebtEl = document.getElementById('ptTotalDebt');
+  const totalDebt = cards.reduce((s,c)=>s+c.balance,0);
+  if(totalDebtEl) totalDebtEl.textContent = `Total: ${fmtMoney(totalDebt)}`;
+
+  if(!cards.length){
+    list.innerHTML = '<div class="empty-state">No cards yet. Tap + Add Card.</div>';
+  } else {
+    list.innerHTML = '';
+    cards.forEach(c=>{
+      const row = document.createElement('div');
+      row.className = 'pt-card-row';
+      const utilPct = c.limit ? Math.round(c.balance/c.limit*100) : null;
+      row.innerHTML = `
+        <div class="pt-card-main">
+          <div class="pt-card-name">${c.name}</div>
+          <div class="pt-card-meta">APR ${c.apr}% · Min ${fmtMoney(c.minPayment)}/mo${utilPct!==null?' · '+utilPct+'% utilization':''}</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="pt-card-balance">${fmtMoney(c.balance)}</div>
+          <div class="pt-card-apr">owes</div>
+        </div>
+        <button data-id="${c.id}" class="ptEditBtn ghost" style="font-size:11px;padding:4px 8px;">Edit</button>
+        <button data-id="${c.id}" class="ptDeleteBtn ghost" style="font-size:11px;padding:4px 8px;color:var(--cold);">✕</button>
+      `;
+      list.appendChild(row);
+    });
+    document.querySelectorAll('.ptEditBtn').forEach(btn=>btn.addEventListener('click',()=>openPTCardForm(btn.dataset.id)));
+    document.querySelectorAll('.ptDeleteBtn').forEach(btn=>btn.addEventListener('click',()=>{
+      if(confirm('Remove this card?')){
+        savePTCards(loadPTCards().filter(c=>c.id!==btn.dataset.id));
+        renderPTCards(); populatePTSelects();
+      }
+    }));
+  }
+  populatePTSelects();
+}
+
+function openPTCardForm(id){
+  const form = document.getElementById('ptCardForm');
+  const cards = loadPTCards();
+  const card = id ? cards.find(c=>c.id===id) : null;
+  document.getElementById('ptFormTitle').textContent = card ? 'Edit Card' : 'Add Card';
+  document.getElementById('ptEditId').value = id || '';
+  document.getElementById('ptName').value = card ? card.name : '';
+  document.getElementById('ptBalance').value = card ? card.balance : '';
+  document.getElementById('ptAPR').value = card ? card.apr : '';
+  document.getElementById('ptMinPayment').value = card ? card.minPayment : '';
+  document.getElementById('ptLimit').value = card && card.limit ? card.limit : '';
+  form.style.display = 'block';
+  form.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+function savePTCardForm(){
+  const id = document.getElementById('ptEditId').value;
+  const card = {
+    id: id || newPTId(),
+    name: document.getElementById('ptName').value.trim() || 'Card',
+    balance: parseFloat(document.getElementById('ptBalance').value) || 0,
+    apr: parseFloat(document.getElementById('ptAPR').value) || 0,
+    minPayment: parseFloat(document.getElementById('ptMinPayment').value) || 0,
+    limit: parseFloat(document.getElementById('ptLimit').value) || null
+  };
+  const cards = loadPTCards();
+  const idx = cards.findIndex(c=>c.id===card.id);
+  if(idx>=0) cards[idx]=card; else cards.push(card);
+  savePTCards(cards);
+  document.getElementById('ptCardForm').style.display='none';
+  renderPTCards();
+}
+
+function populatePTSelects(){
+  const cards = loadPTCards();
+  ['ptCardSelect','ptCalcCardSelect'].forEach(selId=>{
+    const sel = document.getElementById(selId);
+    if(!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">-- Select a card --</option>';
+    cards.forEach(c=>{
+      const opt = document.createElement('option');
+      opt.value = c.id; opt.textContent = `${c.name} — ${fmtMoney(c.balance)}`;
+      sel.appendChild(opt);
+    });
+    if(prev) sel.value = prev;
+  });
+}
+
+/* ── Payoff Parlay Builder ───────────────────────────────────────────────── */
+function onPTCardSelectChange(){
+  const cards = loadPTCards();
+  const id = document.getElementById('ptCardSelect').value;
+  const card = cards.find(c=>c.id===id);
+  if(!card) return;
+  document.getElementById('ptBetAmount').value = card.minPayment;
+  document.getElementById('ptTargetPayout').value = card.balance.toFixed(2);
+  updatePTMultiplierDisplay();
+}
+
+function updatePTMultiplierDisplay(){
+  const bet = parseFloat(document.getElementById('ptBetAmount').value);
+  const target = parseFloat(document.getElementById('ptTargetPayout').value);
+  const el = document.getElementById('ptMultiplierNeeded');
+  if(!el || isNaN(bet) || isNaN(target) || bet<=0) return;
+  const multiplier = (target+bet)/bet;
+  const american = decimalToAmerican(multiplier);
+  el.textContent = `Need ${multiplier.toFixed(1)}x payout (parlay odds approx ${american>0?'+':''}${american})`;
+}
+
+function buildPayoffParlay(){
+  const cards = loadPTCards();
+  const id = document.getElementById('ptCardSelect').value;
+  const card = cards.find(c=>c.id===id);
+  const bet = parseFloat(document.getElementById('ptBetAmount').value);
+  const target = parseFloat(document.getElementById('ptTargetPayout').value);
+  const resultEl = document.getElementById('ptParlayResult');
+
+  if(!card || isNaN(bet) || isNaN(target) || bet<=0){
+    resultEl.innerHTML = '<div class="no-lines-notice">Select a card and enter a bet amount first.</div>';
     return;
   }
 
+  const hrRows = state.liveOdds[PROP_MARKET.HR] || [];
+  if(!hrRows.length){
+    resultEl.innerHTML = `<div class="no-lines-notice">⚠️ No live HR lines loaded. Go to HR Props → Load Live Lines first, then come back.</div>`;
+    return;
+  }
+
+  const hasScan = Object.keys(state.hrScanByName).length > 0;
+  if(!hasScan){
+    resultEl.innerHTML = `<div class="no-lines-notice">⚠️ Run Scan Today's Slate on the HR Props tab first — we need model probabilities to rank the best plays.</div>`;
+    return;
+  }
+
+  // ── Build quality candidate pool ─────────────────────────────────────────
+  // Only positive-odds props where we have a model probability.
+  // Quality threshold: model prob >= 10% (eliminates long-shot garbage).
+  // Sort by MODEL PROBABILITY — most likely to hit first, not biggest payout.
+  const MIN_MODEL_PROB = 0.10;
+  const seen = new Set();
+  const candidates = hrRows
+    .filter(r=>{
+      if(!r.player_name || r.selection_type!=='over' || !r.is_main_line) return false;
+      if(seen.has(r.player_name)) return false;
+      seen.add(r.player_name); return true;
+    })
+    .map(r=>{
+      const scan = state.hrScanByName[r.player_name.toLowerCase()];
+      if(!scan || scan.prob < MIN_MODEL_PROB) return null;
+      return {
+        playerName: r.player_name,
+        matchup: `${r.away_team||'?'} @ ${r.home_team||'?'}`,
+        oddsAmerican: r.odds_american,
+        decimal: americanToDecimal(r.odds_american),
+        impliedProb: r.odds_probability,
+        modelProb: scan.prob,
+        edge: scan.prob - r.odds_probability,
+        sportsbook: r.sportsbook
+      };
+    })
+    .filter(Boolean)
+    .sort((a,b)=> b.modelProb - a.modelProb); // BEST MODEL PROBABILITY FIRST
+
+  if(!candidates.length){
+    resultEl.innerHTML = `<div class="no-lines-notice">No quality HR props found (need model prob ≥ 10%). Try loading lines after the scan runs — or today's slate may not have great matchups.</div>`;
+    return;
+  }
+
+  const requiredDecimal = (target + bet) / bet;
+
+  // ── Build scenarios: 1-leg, 2-leg, 3-leg using the top plays ─────────────
+  const maxLegs = Math.min(4, candidates.length);
+  const scenarios = [];
+
+  for(let n=1; n<=maxLegs; n++){
+    const legs = candidates.slice(0, n);
+    const combinedDecimal = legs.reduce((p,c)=> p * c.decimal, 1);
+    const combinedProb = legs.reduce((p,c)=> p * c.modelProb, 1);
+    const payout = bet * combinedDecimal;
+    const hitsTarget = payout >= target + bet;
+    scenarios.push({ n, legs, combinedDecimal, combinedProb, payout, hitsTarget });
+  }
+
+  // Find recommended scenario: fewest legs that either hits target, or if
+  // none hit it, the one with the best probability (1-leg)
+  const hitting = scenarios.find(s=>s.hitsTarget);
+  const recommended = hitting || scenarios[0];
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  const qualityNote = candidates.length < 3
+    ? `<div class="no-lines-notice" style="margin-bottom:10px;">Only ${candidates.length} quality play${candidates.length!==1?'s':''} found today (model prob ≥ 10%). Scenarios limited accordingly.</div>`
+    : '';
+
+  const scenarioHTML = scenarios.map(s=>{
+    const isRec = s === recommended;
+    const borderColor = isRec ? '#7CC68A' : 'var(--line)';
+    const shortfall = s.payout < target + bet ? fmtMoney((target+bet) - s.payout) + ' short' : '✓ Covers payoff';
+    const shortfallColor = s.hitsTarget ? '#7CC68A' : 'var(--mustard)';
+
+    return `
+      <div style="border:1px solid ${borderColor};border-radius:10px;padding:12px;margin-bottom:10px;${isRec?'background:rgba(124,198,138,0.06);':''}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="font-family:var(--display);font-size:16px;text-transform:uppercase;">
+            ${s.n}-Leg Parlay ${isRec?'<span style="font-size:11px;font-family:var(--mono);color:#7CC68A;margin-left:6px;">● RECOMMENDED</span>':''}
+          </div>
+          <div style="text-align:right;">
+            <div style="font-family:var(--mono);font-weight:700;font-size:15px;">${fmtMoney(s.payout)}</div>
+            <div style="font-family:var(--mono);font-size:10px;color:${shortfallColor};">${shortfall}</div>
+          </div>
+        </div>
+        ${s.legs.map(l=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--line);">
+            <div>
+              <div style="font-weight:700;font-size:12px;">${l.playerName} HR Over 0.5</div>
+              <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);">${l.matchup} · model ${pct(l.modelProb)} · edge ${l.edge>=0?'+':''}${(l.edge*100).toFixed(1)}pt</div>
+            </div>
+            <div style="font-family:var(--mono);font-weight:700;font-size:14px;color:${l.modelProb>=0.15?'#7CC68A':l.modelProb>=0.12?'var(--mustard)':'var(--chalk-dim)'};">
+              ${l.oddsAmerican>0?'+':''}${l.oddsAmerican}
+            </div>
+          </div>
+        `).join('')}
+        <div style="display:flex;justify-content:space-between;margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--chalk-dim);border-top:1px solid var(--line);padding-top:8px;">
+          <span>Hit probability (model): <b style="color:var(--chalk);">${pct(s.combinedProb)}</b></span>
+          <span>Parlay odds: <b style="color:var(--chalk);">${s.combinedDecimal>=2?(decimalToAmerican(s.combinedDecimal)>0?'+':'')+decimalToAmerican(s.combinedDecimal):'—'}</b></span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const gapNote = !hitting
+    ? `<div class="pt-warning-box" style="margin-bottom:10px;">None of today's quality plays reach the ${fmtMoney(target)} target at a ${fmtMoney(bet)} bet — today's HR market doesn't have the right combination of odds. Options: increase bet amount, lower target, or wait for a day with better-priced props on high-probability hitters.</div>`
+    : '';
+
+  resultEl.innerHTML = `
+    <div style="margin-top:12px;">
+      ${qualityNote}
+      ${gapNote}
+      <div style="font-family:var(--mono);font-size:11px;color:var(--chalk-dim);margin-bottom:10px;">
+        ${candidates.length} quality plays found today (model prob ≥ 10%) · sorted by best model probability first
+      </div>
+      ${scenarioHTML}
+      <div class="pt-warning-box">
+        Even the best play is a HR in a single game — roughly a 1-in-7 shot. The 1-leg scenario gives you the best chance of winning anything. Multi-leg parlays compound the risk. The monthly grind below is how the debt actually goes away.
+      </div>
+    </div>
+  `;
+}
+
+/* ── Monthly grind calc ──────────────────────────────────────────────────── */
+function runPayoffCalc(){
+  const cards = loadPTCards();
+  const id = document.getElementById('ptCalcCardSelect').value;
+  const card = cards.find(c=>c.id===id);
+  const payment = parseFloat(document.getElementById('ptPayment').value);
+  const winnings = parseFloat(document.getElementById('ptWinnings').value)||0;
+
+  if(!card || isNaN(payment) || payment<=0){
+    alert('Select a card and enter a monthly payment amount.');
+    return;
+  }
+
+  const {balance, apr, minPayment} = card;
   const result = simulatePayoff(balance, apr, payment, winnings);
 
-  document.getElementById('ptResultPanel').style.display = 'block';
+  document.getElementById('ptResultPanel').style.display='block';
+  document.getElementById('ptResultCardName').textContent = card.name;
   const warnEl = document.getElementById('ptWarning');
 
   if(result.neverPaysOff){
-    document.getElementById('ptMonths').textContent = '∞';
-    document.getElementById('ptMonths').style.color = 'var(--cold)';
-    document.getElementById('ptPayoffDate').textContent = 'Never at this rate';
-    document.getElementById('ptPayoffDate').style.color = 'var(--cold)';
-    document.getElementById('ptInterest').textContent = '—';
-    document.getElementById('ptTotal').textContent = '—';
-    document.getElementById('ptMonthlyInt').textContent = fmtMoney(result.monthlyInterest);
-    document.getElementById('ptPrincipal').textContent = '$0 (all interest)';
-    warnEl.innerHTML = `<div class="no-lines-notice" style="margin-top:12px;">⚠️ Your payment of ${fmtMoney(payment)} doesn't cover the ${fmtMoney(result.monthlyInterest)} in monthly interest. The balance will grow, not shrink. You need to pay more than ${fmtMoney(result.monthlyInterest)}/month just to make progress.</div>`;
-    document.getElementById('ptComparePanel').style.display = 'none';
-    document.getElementById('ptBoostPanel').style.display = 'none';
+    document.getElementById('ptMonths').textContent='∞';
+    document.getElementById('ptMonths').style.color='var(--cold)';
+    document.getElementById('ptPayoffDate').textContent='Never at this rate';
+    document.getElementById('ptPayoffDate').style.color='var(--cold)';
+    document.getElementById('ptInterest').textContent='—';
+    document.getElementById('ptTotal').textContent='—';
+    document.getElementById('ptMonthlyInt').textContent=fmtMoney(result.monthlyInterest);
+    document.getElementById('ptPrincipal').textContent='$0';
+    warnEl.innerHTML=`<div class="no-lines-notice" style="margin-top:10px;">⚠️ ${fmtMoney(payment)}/mo doesn't cover the ${fmtMoney(result.monthlyInterest)} monthly interest. The balance grows every month. You need more than ${fmtMoney(result.monthlyInterest)}/mo to make any progress.</div>`;
+    document.getElementById('ptComparePanel').style.display='none';
+    document.getElementById('ptBoostPanel').style.display='none';
     return;
   }
 
-  const tag = tagColorForPayoff(result.months);
-  document.getElementById('ptMonths').textContent = monthsToText(result.months);
-  document.getElementById('ptMonths').style.color = tag;
-  document.getElementById('ptPayoffDate').textContent = payoffDateText(result.months);
-  document.getElementById('ptPayoffDate').style.color = tag;
-  document.getElementById('ptPayoffDate').style.border = `1px solid ${tag}`;
-  document.getElementById('ptInterest').textContent = fmtMoney(result.totalInterest);
-  document.getElementById('ptTotal').textContent = fmtMoney(result.totalPaid);
-  document.getElementById('ptMonthlyInt').textContent = fmtMoney(result.monthlyInterest);
-  document.getElementById('ptPrincipal').textContent = fmtMoney(result.firstPrincipal);
-  warnEl.innerHTML = '';
+  const color = tagColorForPayoff(result.months);
+  document.getElementById('ptMonths').textContent=monthsToText(result.months);
+  document.getElementById('ptMonths').style.color=color;
+  document.getElementById('ptPayoffDate').textContent=payoffDateText(result.months);
+  document.getElementById('ptPayoffDate').style.color=color;
+  document.getElementById('ptPayoffDate').style.border=`1px solid ${color}`;
+  document.getElementById('ptInterest').textContent=fmtMoney(result.totalInterest);
+  document.getElementById('ptTotal').textContent=fmtMoney(result.totalPaid);
+  document.getElementById('ptMonthlyInt').textContent=fmtMoney(result.monthlyInterest);
+  document.getElementById('ptPrincipal').textContent=fmtMoney(result.firstPrincipal);
+  warnEl.innerHTML='';
 
-  // ── Compare vs minimum payment ──────────────────────────────────────────
-  const comparePanel = document.getElementById('ptComparePanel');
-  if(!isNaN(minPayment) && minPayment > 0 && minPayment < payment){
-    const minResult = simulatePayoff(balance, apr, minPayment, 0);
-    const body = document.getElementById('ptCompareBody');
-    if(minResult.neverPaysOff){
-      body.innerHTML = `<div class="reliability-detail">At the minimum of ${fmtMoney(minPayment)}, this card <b style="color:var(--cold);">never pays off</b> — it doesn't cover interest. Your ${fmtMoney(payment)} plan is the difference between debt-free and debt-forever.</div>`;
+  // vs minimum
+  const comparePanel=document.getElementById('ptComparePanel');
+  if(minPayment>0 && minPayment<payment){
+    const minR=simulatePayoff(balance,apr,minPayment,0);
+    const body=document.getElementById('ptCompareBody');
+    if(minR.neverPaysOff){
+      body.innerHTML=`<div class="reliability-detail">At the minimum of ${fmtMoney(minPayment)}, this card <b style="color:var(--cold);">never pays off</b>. Your ${fmtMoney(payment)} plan is the difference between debt-free and debt-forever.</div>`;
     } else {
-      const monthsSaved = minResult.months - result.months;
-      const interestSaved = minResult.totalInterest - result.totalInterest;
-      body.innerHTML = `
-        <table class="roi-table">
-          <tr><th></th><th>Min (${fmtMoney(minPayment)})</th><th>Your Plan (${fmtMoney(payment)})</th></tr>
-          <tr><td>Time to payoff</td><td class="dim">${monthsToText(minResult.months)}</td><td class="profit">${monthsToText(result.months)}</td></tr>
-          <tr><td>Total interest</td><td class="loss">${fmtMoney(minResult.totalInterest)}</td><td class="profit">${fmtMoney(result.totalInterest)}</td></tr>
-        </table>
-        <div class="reliability-detail" style="margin-top:10px;">Your fixed-payment plan saves <b style="color:#7CC68A;">${monthsToText(monthsSaved)}</b> and <b style="color:#7CC68A;">${fmtMoney(interestSaved)}</b> in interest vs paying the minimum.</div>
-      `;
+      const mSaved=minR.months-result.months, iSaved=minR.totalInterest-result.totalInterest;
+      body.innerHTML=`<table class="roi-table">
+        <tr><th></th><th>Min (${fmtMoney(minPayment)})</th><th>Your Plan (${fmtMoney(payment)})</th></tr>
+        <tr><td>Time</td><td class="dim">${monthsToText(minR.months)}</td><td class="profit">${monthsToText(result.months)}</td></tr>
+        <tr><td>Total interest</td><td class="loss">${fmtMoney(minR.totalInterest)}</td><td class="profit">${fmtMoney(result.totalInterest)}</td></tr>
+      </table>
+      <div class="reliability-detail" style="margin-top:8px;">Your plan saves <b style="color:#7CC68A;">${monthsToText(mSaved)}</b> and <b style="color:#7CC68A;">${fmtMoney(iSaved)}</b> in interest.</div>`;
     }
-    comparePanel.style.display = 'block';
-  } else {
-    comparePanel.style.display = 'none';
-  }
+    comparePanel.style.display='block';
+  } else { comparePanel.style.display='none'; }
 
-  // ── Betting boost effect ────────────────────────────────────────────────
-  const boostPanel = document.getElementById('ptBoostPanel');
-  if(winnings > 0){
-    const noBoost = simulatePayoff(balance, apr, payment, 0);
-    const body = document.getElementById('ptBoostBody');
+  // Betting boost
+  const boostPanel=document.getElementById('ptBoostPanel');
+  if(winnings>0){
+    const noBoost=simulatePayoff(balance,apr,payment,0);
     if(!noBoost.neverPaysOff){
-      const monthsSaved = noBoost.months - result.months;
-      const interestSaved = noBoost.totalInterest - result.totalInterest;
-      body.innerHTML = `
-        <table class="roi-table">
-          <tr><th></th><th>Payment Only</th><th>+ ${fmtMoney(winnings)}/mo Winnings</th></tr>
-          <tr><td>Time to payoff</td><td class="dim">${monthsToText(noBoost.months)}</td><td class="profit">${monthsToText(result.months)}</td></tr>
-          <tr><td>Total interest</td><td class="loss">${fmtMoney(noBoost.totalInterest)}</td><td class="profit">${fmtMoney(result.totalInterest)}</td></tr>
-        </table>
-        <div class="reliability-detail" style="margin-top:10px;">Adding ${fmtMoney(winnings)}/mo in winnings cuts <b style="color:#7CC68A;">${monthsToText(monthsSaved)}</b> and saves <b style="color:#7CC68A;">${fmtMoney(interestSaved)}</b>. Remember winnings vary — treat this as a bonus accelerator, not a guarantee.</div>
-      `;
+      const mSaved=noBoost.months-result.months, iSaved=noBoost.totalInterest-result.totalInterest;
+      document.getElementById('ptBoostBody').innerHTML=`<table class="roi-table">
+        <tr><th></th><th>Payment Only</th><th>+ ${fmtMoney(winnings)}/mo Wins</th></tr>
+        <tr><td>Time</td><td class="dim">${monthsToText(noBoost.months)}</td><td class="profit">${monthsToText(result.months)}</td></tr>
+        <tr><td>Total interest</td><td class="loss">${fmtMoney(noBoost.totalInterest)}</td><td class="profit">${fmtMoney(result.totalInterest)}</td></tr>
+      </table>
+      <div class="reliability-detail" style="margin-top:8px;">Adding ${fmtMoney(winnings)}/mo winnings cuts <b style="color:#7CC68A;">${monthsToText(mSaved)}</b> and saves <b style="color:#7CC68A;">${fmtMoney(iSaved)}</b>. Variable — treat as a bonus accelerator.</div>`;
+      boostPanel.style.display='block';
     }
-    boostPanel.style.display = 'block';
-  } else {
-    boostPanel.style.display = 'none';
-  }
-
-  // Persist the card
-  savePayTabCard({ name, balance, apr, payment, minPayment, winnings });
+  } else { boostPanel.style.display='none'; }
 }
 
-function tagColorForPayoff(months){
-  if(months <= 12) return '#7CC68A';
-  if(months <= 36) return 'var(--mustard)';
-  return 'var(--clay-2)';
-}
-
-const PAYTAB_KEY = 'mlb_paytab_cards';
-function savePayTabCard(card){
-  // Single card for v1 — store the most recent input
-  localStorage.setItem(PAYTAB_KEY, JSON.stringify(card));
-}
-function loadPayTabCard(){
-  try{ return JSON.parse(localStorage.getItem(PAYTAB_KEY) || 'null'); }catch(e){ return null; }
-}
-function restorePayTabInputs(){
-  const c = loadPayTabCard();
-  if(!c) return;
-  if(c.name) document.getElementById('ptName').value = c.name;
-  if(c.balance) document.getElementById('ptBalance').value = c.balance;
-  if(c.apr) document.getElementById('ptAPR').value = c.apr;
-  if(c.payment) document.getElementById('ptPayment').value = c.payment;
-  if(c.minPayment) document.getElementById('ptMinPayment').value = c.minPayment;
-  if(c.winnings) document.getElementById('ptWinnings').value = c.winnings;
+function initPayTab(){
+  renderPTCards();
+  document.getElementById('ptAddCardBtn').addEventListener('click',()=>openPTCardForm(null));
+  document.getElementById('ptSaveCardBtn').addEventListener('click',savePTCardForm);
+  document.getElementById('ptCancelCardBtn').addEventListener('click',()=>{ document.getElementById('ptCardForm').style.display='none'; });
+  document.getElementById('ptCalcBtn').addEventListener('click',runPayoffCalc);
+  document.getElementById('ptBuildParlayBtn').addEventListener('click',buildPayoffParlay);
+  document.getElementById('ptCardSelect').addEventListener('change',onPTCardSelectChange);
+  document.getElementById('ptBetAmount').addEventListener('input',updatePTMultiplierDisplay);
+  document.getElementById('ptTargetPayout').addEventListener('input',updatePTMultiplierDisplay);
 }
 
 function wireTabs(){
@@ -3862,6 +4145,7 @@ function wireTabs(){
       if(btn.dataset.tab === 'tracking') renderTracking();
       if(btn.dataset.tab === 'parlay') renderParlay();
       if(btn.dataset.tab === 'lab') renderLab();
+      if(btn.dataset.tab === 'paytab') renderPTCards();
     });
   });
 }
@@ -3979,8 +4263,7 @@ function init(){
     document.getElementById('trackGradeProgress').textContent = '';
   });
 
-  document.getElementById('ptCalcBtn').addEventListener('click', runPayoffCalc);
-  restorePayTabInputs();
+  initPayTab();
 
   loadSchedule(state.date);
   renderParlay();
