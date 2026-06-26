@@ -239,6 +239,7 @@
   <button class="tab-btn" data-tab="parlay">Parlay</button>
   <button class="tab-btn" data-tab="lab">Props Lab</button>
   <button class="tab-btn" data-tab="tracking">Tracking</button>
+  <button class="tab-btn" data-tab="paytab">Pay The Tab</button>
 </nav>
 
 <main>
@@ -695,6 +696,73 @@
         <button class="lab-filter-btn" data-tfilter="WINNER">Winners</button>
       </div>
       <div id="trackLog"></div>
+    </div>
+
+  </div>
+
+  <!-- ============ PAY THE TAB TAB ============ -->
+  <div id="tab-paytab" style="display:none;">
+
+    <div class="panel">
+      <div class="panel-title">Pay The Tab</div>
+      <div class="panel-desc">The minimum payment is built to keep you in debt — most of it is interest. The trick is to lock in a fixed payment each month (never letting it shrink as the balance drops) and throw betting winnings on top. Enter your card below and see how many months and how much interest you cut.</div>
+
+      <div class="field-row">
+        <label>Card Nickname (optional)</label>
+        <input type="text" id="ptName" placeholder="e.g. Chase Freedom">
+      </div>
+      <div class="two-col">
+        <div class="field-row">
+          <label>Current Balance ($)</label>
+          <input type="number" id="ptBalance" placeholder="3500" step="50">
+        </div>
+        <div class="field-row">
+          <label>APR (%)</label>
+          <input type="number" id="ptAPR" placeholder="24.99" step="0.01">
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="field-row">
+          <label>Your Fixed Monthly Payment ($)</label>
+          <input type="number" id="ptPayment" placeholder="200" step="10">
+        </div>
+        <div class="field-row">
+          <label>Min Payment (optional, for compare)</label>
+          <input type="number" id="ptMinPayment" placeholder="70" step="5">
+        </div>
+      </div>
+      <div class="field-row">
+        <label>Avg Monthly Betting Winnings to Add ($) — optional</label>
+        <input type="number" id="ptWinnings" placeholder="0" step="10" value="0">
+      </div>
+
+      <button class="primary" id="ptCalcBtn" style="width:100%;">Calculate Payoff</button>
+    </div>
+
+    <div class="panel" id="ptResultPanel" style="display:none;">
+      <div class="panel-title">Payoff Plan</div>
+      <div class="readout">
+        <div class="readout-label">Debt-Free In</div>
+        <div class="readout-number" id="ptMonths">--</div>
+        <div class="readout-tag" id="ptPayoffDate">—</div>
+        <div class="stat-grid">
+          <div class="stat-box"><div class="k">Total Interest Paid</div><div class="v" id="ptInterest">--</div></div>
+          <div class="stat-box"><div class="k">Total Paid</div><div class="v" id="ptTotal">--</div></div>
+          <div class="stat-box"><div class="k">Monthly Interest (now)</div><div class="v" id="ptMonthlyInt">--</div></div>
+          <div class="stat-box"><div class="k">First Payment to Principal</div><div class="v" id="ptPrincipal">--</div></div>
+        </div>
+        <div id="ptWarning"></div>
+      </div>
+    </div>
+
+    <div class="panel" id="ptComparePanel" style="display:none;">
+      <div class="panel-title">vs Minimum Payment</div>
+      <div id="ptCompareBody"></div>
+    </div>
+
+    <div class="panel" id="ptBoostPanel" style="display:none;">
+      <div class="panel-title">Betting Boost Effect</div>
+      <div id="ptBoostBody"></div>
     </div>
 
   </div>
@@ -3609,13 +3677,185 @@ function wireTrackFilters(){
   });
 }
 
+/* =========================================================================
+   PAY THE TAB — credit card payoff calculator
+   ========================================================================= */
+// Simulates month-by-month amortization. Returns months to payoff, total
+// interest, and a schedule. Caps at 1200 months (100yr) to avoid infinite loop
+// when payment doesn't cover interest.
+function simulatePayoff(balance, apr, monthlyPayment, extraPerMonth){
+  const monthlyRate = (apr/100)/12;
+  let bal = balance;
+  let months = 0;
+  let totalInterest = 0;
+  let firstInterest = null, firstPrincipal = null;
+  const MAX = 1200;
+
+  while(bal > 0.01 && months < MAX){
+    const interest = bal * monthlyRate;
+    if(months === 0) firstInterest = interest;
+    const pay = monthlyPayment + (extraPerMonth||0);
+    // If payment doesn't even cover interest, it'll never pay off
+    if(pay <= interest && months === 0){
+      return { neverPaysOff:true, monthlyInterest:interest };
+    }
+    const principal = pay - interest;
+    if(months === 0) firstPrincipal = principal;
+    bal = bal + interest - pay;
+    totalInterest += interest;
+    months++;
+    if(bal < 0) bal = 0;
+  }
+  return {
+    neverPaysOff: months >= MAX,
+    months, totalInterest,
+    totalPaid: balance + totalInterest,
+    monthlyInterest: firstInterest,
+    firstPrincipal
+  };
+}
+
+function fmtMoney(n){
+  return '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function monthsToText(m){
+  if(m < 12) return `${m} month${m!==1?'s':''}`;
+  const yrs = Math.floor(m/12), rem = m%12;
+  return `${yrs}y ${rem}m`;
+}
+function payoffDateText(months){
+  const d = new Date();
+  d.setMonth(d.getMonth() + months);
+  return d.toLocaleDateString('en-US', {month:'long', year:'numeric'});
+}
+
+function runPayoffCalc(){
+  const name = document.getElementById('ptName').value.trim();
+  const balance = parseFloat(document.getElementById('ptBalance').value);
+  const apr = parseFloat(document.getElementById('ptAPR').value);
+  const payment = parseFloat(document.getElementById('ptPayment').value);
+  const minPayment = parseFloat(document.getElementById('ptMinPayment').value);
+  const winnings = parseFloat(document.getElementById('ptWinnings').value) || 0;
+
+  if(isNaN(balance) || isNaN(apr) || isNaN(payment) || balance<=0 || payment<=0){
+    alert('Enter at least a balance, APR, and your fixed monthly payment.');
+    return;
+  }
+
+  const result = simulatePayoff(balance, apr, payment, winnings);
+
+  document.getElementById('ptResultPanel').style.display = 'block';
+  const warnEl = document.getElementById('ptWarning');
+
+  if(result.neverPaysOff){
+    document.getElementById('ptMonths').textContent = '∞';
+    document.getElementById('ptMonths').style.color = 'var(--cold)';
+    document.getElementById('ptPayoffDate').textContent = 'Never at this rate';
+    document.getElementById('ptPayoffDate').style.color = 'var(--cold)';
+    document.getElementById('ptInterest').textContent = '—';
+    document.getElementById('ptTotal').textContent = '—';
+    document.getElementById('ptMonthlyInt').textContent = fmtMoney(result.monthlyInterest);
+    document.getElementById('ptPrincipal').textContent = '$0 (all interest)';
+    warnEl.innerHTML = `<div class="no-lines-notice" style="margin-top:12px;">⚠️ Your payment of ${fmtMoney(payment)} doesn't cover the ${fmtMoney(result.monthlyInterest)} in monthly interest. The balance will grow, not shrink. You need to pay more than ${fmtMoney(result.monthlyInterest)}/month just to make progress.</div>`;
+    document.getElementById('ptComparePanel').style.display = 'none';
+    document.getElementById('ptBoostPanel').style.display = 'none';
+    return;
+  }
+
+  const tag = tagColorForPayoff(result.months);
+  document.getElementById('ptMonths').textContent = monthsToText(result.months);
+  document.getElementById('ptMonths').style.color = tag;
+  document.getElementById('ptPayoffDate').textContent = payoffDateText(result.months);
+  document.getElementById('ptPayoffDate').style.color = tag;
+  document.getElementById('ptPayoffDate').style.border = `1px solid ${tag}`;
+  document.getElementById('ptInterest').textContent = fmtMoney(result.totalInterest);
+  document.getElementById('ptTotal').textContent = fmtMoney(result.totalPaid);
+  document.getElementById('ptMonthlyInt').textContent = fmtMoney(result.monthlyInterest);
+  document.getElementById('ptPrincipal').textContent = fmtMoney(result.firstPrincipal);
+  warnEl.innerHTML = '';
+
+  // ── Compare vs minimum payment ──────────────────────────────────────────
+  const comparePanel = document.getElementById('ptComparePanel');
+  if(!isNaN(minPayment) && minPayment > 0 && minPayment < payment){
+    const minResult = simulatePayoff(balance, apr, minPayment, 0);
+    const body = document.getElementById('ptCompareBody');
+    if(minResult.neverPaysOff){
+      body.innerHTML = `<div class="reliability-detail">At the minimum of ${fmtMoney(minPayment)}, this card <b style="color:var(--cold);">never pays off</b> — it doesn't cover interest. Your ${fmtMoney(payment)} plan is the difference between debt-free and debt-forever.</div>`;
+    } else {
+      const monthsSaved = minResult.months - result.months;
+      const interestSaved = minResult.totalInterest - result.totalInterest;
+      body.innerHTML = `
+        <table class="roi-table">
+          <tr><th></th><th>Min (${fmtMoney(minPayment)})</th><th>Your Plan (${fmtMoney(payment)})</th></tr>
+          <tr><td>Time to payoff</td><td class="dim">${monthsToText(minResult.months)}</td><td class="profit">${monthsToText(result.months)}</td></tr>
+          <tr><td>Total interest</td><td class="loss">${fmtMoney(minResult.totalInterest)}</td><td class="profit">${fmtMoney(result.totalInterest)}</td></tr>
+        </table>
+        <div class="reliability-detail" style="margin-top:10px;">Your fixed-payment plan saves <b style="color:#7CC68A;">${monthsToText(monthsSaved)}</b> and <b style="color:#7CC68A;">${fmtMoney(interestSaved)}</b> in interest vs paying the minimum.</div>
+      `;
+    }
+    comparePanel.style.display = 'block';
+  } else {
+    comparePanel.style.display = 'none';
+  }
+
+  // ── Betting boost effect ────────────────────────────────────────────────
+  const boostPanel = document.getElementById('ptBoostPanel');
+  if(winnings > 0){
+    const noBoost = simulatePayoff(balance, apr, payment, 0);
+    const body = document.getElementById('ptBoostBody');
+    if(!noBoost.neverPaysOff){
+      const monthsSaved = noBoost.months - result.months;
+      const interestSaved = noBoost.totalInterest - result.totalInterest;
+      body.innerHTML = `
+        <table class="roi-table">
+          <tr><th></th><th>Payment Only</th><th>+ ${fmtMoney(winnings)}/mo Winnings</th></tr>
+          <tr><td>Time to payoff</td><td class="dim">${monthsToText(noBoost.months)}</td><td class="profit">${monthsToText(result.months)}</td></tr>
+          <tr><td>Total interest</td><td class="loss">${fmtMoney(noBoost.totalInterest)}</td><td class="profit">${fmtMoney(result.totalInterest)}</td></tr>
+        </table>
+        <div class="reliability-detail" style="margin-top:10px;">Adding ${fmtMoney(winnings)}/mo in winnings cuts <b style="color:#7CC68A;">${monthsToText(monthsSaved)}</b> and saves <b style="color:#7CC68A;">${fmtMoney(interestSaved)}</b>. Remember winnings vary — treat this as a bonus accelerator, not a guarantee.</div>
+      `;
+    }
+    boostPanel.style.display = 'block';
+  } else {
+    boostPanel.style.display = 'none';
+  }
+
+  // Persist the card
+  savePayTabCard({ name, balance, apr, payment, minPayment, winnings });
+}
+
+function tagColorForPayoff(months){
+  if(months <= 12) return '#7CC68A';
+  if(months <= 36) return 'var(--mustard)';
+  return 'var(--clay-2)';
+}
+
+const PAYTAB_KEY = 'mlb_paytab_cards';
+function savePayTabCard(card){
+  // Single card for v1 — store the most recent input
+  localStorage.setItem(PAYTAB_KEY, JSON.stringify(card));
+}
+function loadPayTabCard(){
+  try{ return JSON.parse(localStorage.getItem(PAYTAB_KEY) || 'null'); }catch(e){ return null; }
+}
+function restorePayTabInputs(){
+  const c = loadPayTabCard();
+  if(!c) return;
+  if(c.name) document.getElementById('ptName').value = c.name;
+  if(c.balance) document.getElementById('ptBalance').value = c.balance;
+  if(c.apr) document.getElementById('ptAPR').value = c.apr;
+  if(c.payment) document.getElementById('ptPayment').value = c.payment;
+  if(c.minPayment) document.getElementById('ptMinPayment').value = c.minPayment;
+  if(c.winnings) document.getElementById('ptWinnings').value = c.winnings;
+}
+
 function wireTabs(){
   document.querySelectorAll('.tab-btn').forEach(btn=>{
     if(btn.disabled) return;
     btn.addEventListener('click', ()=>{
       document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
-      ['hr','ks','outs','winners','parlay','lab','tracking'].forEach(t=>{
+      ['hr','ks','outs','winners','parlay','lab','tracking','paytab'].forEach(t=>{
         const el = document.getElementById('tab-'+t);
         if(el) el.style.display = (t === btn.dataset.tab) ? 'block' : 'none';
       });
@@ -3738,6 +3978,9 @@ function init(){
     await bulkGradeAllPending();
     document.getElementById('trackGradeProgress').textContent = '';
   });
+
+  document.getElementById('ptCalcBtn').addEventListener('click', runPayoffCalc);
+  restorePayTabInputs();
 
   loadSchedule(state.date);
   renderParlay();
