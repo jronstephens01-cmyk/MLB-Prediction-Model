@@ -824,7 +824,10 @@
       <div class="panel-title">Cloud Sync <small>auto-grades picks nightly</small></div>
       <div class="panel-desc">Every pick you capture gets synced to the cloud. The cron job runs at 2 AM PT every night, fetches box scores for all that day's games, and grades every pending pick automatically. You never have to manually grade anything.</div>
       <div class="odds-status" id="kvSyncStatus">Connecting…</div>
-      <button class="ghost" id="kvSyncNowBtn" style="width:100%; margin-top:8px;">Force Sync Now</button>
+      <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+        <button class="ghost" id="kvSyncNowBtn" style="flex:1;">Sync Now</button>
+        <button class="ghost" id="kvPushNowBtn" style="flex:1;">Push My Picks to Cloud</button>
+      </div>
       <div class="stat-grid" style="margin-top:10px;">
         <div class="stat-box"><div class="k">Synced Picks</div><div class="v" id="kvPickCount">--</div></div>
         <div class="stat-box"><div class="k">Last Auto-Grade</div><div class="v" id="kvLastGrade">--</div></div>
@@ -3129,6 +3132,19 @@ function saveLabProps(props){ localStorage.setItem(LAB_KEY, JSON.stringify(props
 // Captures props to the lab. For HR: captures the FULL board (not just edge plays)
 // so we have calibration data for every evaluated matchup. The "recommended" flag marks
 // the plays we'd actually bet (edge > threshold). unitProfit is filled in on grading.
+// Helper: find gamePk by matching team names from the odds row to loaded schedule
+function findGamePkFromTeams(awayTeam, homeTeam){
+  if(!state.games || !state.games.length || (!awayTeam && !homeTeam)) return null;
+  const awayWord = (awayTeam||'').split(' ').pop().toLowerCase();
+  const homeWord = (homeTeam||'').split(' ').pop().toLowerCase();
+  const game = state.games.find(g=>{
+    const a = (g.teams.away.team.name||'').toLowerCase();
+    const h = (g.teams.home.team.name||'').toLowerCase();
+    return a.includes(awayWord) && h.includes(homeWord);
+  });
+  return game ? game.gamePk : null;
+}
+
 function captureLabProps(marketSlug, propType, rows){
   const existing = loadLabProps();
   const keySet = new Set(existing.map(p=>p.key));
@@ -3151,6 +3167,9 @@ function captureLabProps(marketSlug, propType, rows){
     const tier = edge >= 0.07 ? 'strong' : edge >= 0.04 ? 'medium' : edge >= 0.01 ? 'small' : 'none';
     const recommended = edge >= EDGE_TAKE_THRESHOLD;
 
+    // Attach gamePk so the cron auto-grader can find the box score
+    const gamePk = findGamePkFromTeams(row.away_team, row.home_team);
+
     newProps.push({
       id: newId(), key,
       date: state.date,
@@ -3163,16 +3182,20 @@ function captureLabProps(marketSlug, propType, rows){
       modelProb,
       edge,
       tier,
-      recommended,   // true = we'd bet this, counts toward ROI
-      unitProfit: null, // filled in when graded: decimal payout - 1 on win, -1 on loss
+      recommended,
+      unitProfit: null,
       status: 'pending',
-      gamePk: null
+      gamePk,
+      line: row.line,
+      side: row.selection_type === 'over' ? 'Over' : 'Under'
     });
   });
 
   if(newProps.length){
     saveLabProps([...existing, ...newProps]);
     logDebug(`Props Lab: captured ${newProps.length} props (${propType}) — ${newProps.filter(p=>p.recommended).length} recommended`, true);
+    // Push to KV immediately so cron can grade them tonight
+    setTimeout(()=> syncTodayPicksToKV(), 500);
   }
   return newProps.length;
 }
@@ -4042,51 +4065,88 @@ function buildPayoffParlay(){
   if(!card || isNaN(bet) || isNaN(target) || bet<=0){
     resultEl.innerHTML = '<div class="no-lines-notice">Select a card and enter a bet amount first.</div>';
     return;
-  }
-
-  const hrRows = state.liveOdds[PROP_MARKET.HR] || [];
-  if(!hrRows.length){
-    resultEl.innerHTML = `<div class="no-lines-notice">⚠️ No live HR lines loaded. Go to HR Props → Load Live Lines first, then come back.</div>`;
-    return;
-  }
-
-  const hasScan = Object.keys(state.hrScanByName).length > 0;
-  if(!hasScan){
-    resultEl.innerHTML = `<div class="no-lines-notice">⚠️ Run Scan Today's Slate on the HR Props tab first — we need model probabilities to rank the best plays.</div>`;
-    return;
-  }
-
-  // ── Build quality candidate pool ─────────────────────────────────────────
-  // Only positive-odds props where we have a model probability.
-  // Quality threshold: model prob >= 10% (eliminates long-shot garbage).
-  // Sort by MODEL PROBABILITY — most likely to hit first, not biggest payout.
+  }  // ── Build quality candidate pool from ALL prop types ────────────────────
+  // Sources: Props Lab (has HR, K, OUTS, TOTAL), Winners cache + moneyline odds
+  // Quality threshold: model prob >= 10%. Sort by model probability (best shot first).
   const MIN_MODEL_PROB = 0.10;
-  const seen = new Set();
-  const candidates = hrRows
-    .filter(r=>{
-      if(!r.player_name || r.selection_type!=='over' || !r.is_main_line) return false;
-      if(seen.has(r.player_name)) return false;
-      seen.add(r.player_name); return true;
-    })
-    .map(r=>{
-      const scan = state.hrScanByName[r.player_name.toLowerCase()];
-      if(!scan || scan.prob < MIN_MODEL_PROB) return null;
-      return {
-        playerName: r.player_name,
-        matchup: `${r.away_team||'?'} @ ${r.home_team||'?'}`,
-        oddsAmerican: r.odds_american,
-        decimal: americanToDecimal(r.odds_american),
-        impliedProb: r.odds_probability,
-        modelProb: scan.prob,
-        edge: scan.prob - r.odds_probability,
-        sportsbook: r.sportsbook
-      };
-    })
-    .filter(Boolean)
-    .sort((a,b)=> b.modelProb - a.modelProb); // BEST MODEL PROBABILITY FIRST
+  const candidates = [];
+  const seenKeys = new Set();
+
+  // Source 1: Props Lab captured today — richest source, already has all prop types
+  const labToday = loadLabProps().filter(p=>
+    p.status==='pending' && p.date===state.date &&
+    p.modelProb >= MIN_MODEL_PROB && p.oddsAmerican > 0
+  );
+  labToday.forEach(p=>{
+    const k = `${p.propType}_${p.subject}`;
+    if(seenKeys.has(k)) return; seenKeys.add(k);
+    candidates.push({
+      playerName: p.subject,
+      matchup: p.matchup,
+      propType: p.propType,
+      detail: p.detail,
+      oddsAmerican: p.oddsAmerican,
+      decimal: americanToDecimal(p.oddsAmerican),
+      impliedProb: p.impliedProb,
+      modelProb: p.modelProb,
+      edge: p.edge,
+      sportsbook: p.sportsbook
+    });
+  });
+
+  // Source 2: HR scan (in case lines were loaded but lab didn't capture yet)
+  const hrRows = state.liveOdds[PROP_MARKET.HR] || [];
+  hrRows.filter(r=>r.is_main_line && r.selection_type==='over' && r.player_name).forEach(r=>{
+    const k = `HR_${r.player_name}`;
+    if(seenKeys.has(k)) return;
+    const scan = state.hrScanByName[r.player_name.toLowerCase()];
+    if(!scan || scan.prob < MIN_MODEL_PROB || r.odds_american <= 0) return;
+    seenKeys.add(k);
+    candidates.push({
+      playerName: r.player_name, matchup:`${r.away_team||'?'} @ ${r.home_team||'?'}`,
+      propType:'HR', detail:`HR vs ${scan.opp||'opposing pitcher'}`,
+      oddsAmerican:r.odds_american, decimal:americanToDecimal(r.odds_american),
+      impliedProb:r.odds_probability, modelProb:scan.prob,
+      edge:scan.prob-r.odds_probability, sportsbook:r.sportsbook
+    });
+  });
+
+  // Source 3: Winners from __winCache + moneyline odds
+  const mlRows = state.liveOdds.moneyline || [];
+  if(state.__winCache){
+    Object.values(state.__winCache).forEach(r=>{
+      ['away','home'].forEach(side=>{
+        const prob = side==='away'?r.awayProb:r.homeProb;
+        const name = side==='away'?r.awayName:r.homeName;
+        const abbr = side==='away'?r.awayAbbr:r.homeAbbr;
+        if(prob < MIN_MODEL_PROB) return;
+        const k = `WINNER_${abbr}`;
+        if(seenKeys.has(k)) return;
+        const oddsRow = findMoneylineOddsForTeam(mlRows, name);
+        if(!oddsRow || oddsRow.odds_american <= 0) return;
+        seenKeys.add(k);
+        candidates.push({
+          playerName:`${abbr} Moneyline`, matchup:`${r.awayAbbr} @ ${r.homeAbbr}`,
+          propType:'WINNER', detail:`${abbr} wins`,
+          oddsAmerican:oddsRow.odds_american, decimal:americanToDecimal(oddsRow.odds_american),
+          impliedProb:oddsRow.odds_probability, modelProb:prob,
+          edge:prob-oddsRow.odds_probability, sportsbook:oddsRow.sportsbook
+        });
+      });
+    });
+  }
+
+  // Sort: best model probability first
+  candidates.sort((a,b)=> b.modelProb - a.modelProb);
+
+  const hasAnyLines = hrRows.length || mlRows.length || (state.liveOdds[PROP_MARKET.K]||[]).length;
+  if(!hasAnyLines){
+    resultEl.innerHTML = `<div class="no-lines-notice">⚠️ No live lines loaded. Go to each tab and tap "Load Live Lines", then come back.</div>`;
+    return;
+  }
 
   if(!candidates.length){
-    resultEl.innerHTML = `<div class="no-lines-notice">No quality HR props found (need model prob ≥ 10%). Try loading lines after the scan runs — or today's slate may not have great matchups.</div>`;
+    resultEl.innerHTML = `<div class="no-lines-notice">No quality plays found yet (model prob ≥ 10%). Run Scan on HR Props, K's, Outs, and Winners tabs first, then load live lines on each — this parlay pulls from everything.</div>`;
     return;
   }
 
@@ -4135,10 +4195,10 @@ function buildPayoffParlay(){
         ${s.legs.map(l=>`
           <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--line);">
             <div>
-              <div style="font-weight:700;font-size:12px;">${l.playerName} HR Over 0.5</div>
-              <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);">${l.matchup} · model ${pct(l.modelProb)} · edge ${l.edge>=0?'+':''}${(l.edge*100).toFixed(1)}pt</div>
+              <div style="font-weight:700;font-size:12px;"><span class="type-chip">${l.propType}</span>${l.playerName}</div>
+              <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);">${l.matchup} · ${l.detail} · model ${pct(l.modelProb)} · edge ${l.edge>=0?'+':''}${(l.edge*100).toFixed(1)}pt</div>
             </div>
-            <div style="font-family:var(--mono);font-weight:700;font-size:14px;color:${l.modelProb>=0.15?'#7CC68A':l.modelProb>=0.12?'var(--mustard)':'var(--chalk-dim)'};">
+            <div style="font-family:var(--mono);font-weight:700;font-size:14px;color:${l.modelProb>=0.55?'#7CC68A':l.modelProb>=0.40?'var(--mustard)':l.modelProb>=0.15?'var(--chalk)':'var(--chalk-dim)'};">
               ${l.oddsAmerican>0?'+':''}${l.oddsAmerican}
             </div>
           </div>
@@ -4873,6 +4933,15 @@ function init(){
   // AI Analyst + KV sync
   document.getElementById('aiAnalyzeBtn').addEventListener('click', runAIAnalysis);
   document.getElementById('kvSyncNowBtn').addEventListener('click', syncFromKV);
+  document.getElementById('kvPushNowBtn').addEventListener('click', async ()=>{
+    const allProps = loadLabProps();
+    const byDate = {};
+    allProps.forEach(p=>{ if(!byDate[p.date]) byDate[p.date]=[]; byDate[p.date].push(p); });
+    let pushed=0;
+    for(const [date, picks] of Object.entries(byDate)){ await pushToKV(date, picks); pushed+=picks.length; }
+    document.getElementById('kvSyncStatus').textContent = `Pushed ${pushed} picks across ${Object.keys(byDate).length} dates to cloud.`;
+    setTimeout(syncFromKV, 1000);
+  });
 
   loadSchedule(state.date);
   renderParlay();
