@@ -1052,6 +1052,8 @@ let state = {
   lineupCache: {},       // gamePk -> [{personId, battingOrder, position}]
   pitcherHands: {},      // personId -> 'R'|'L'
   hrScanByName: {},
+  ksScanByName: {},    // lowercase name → {lambda, line, gamePk, team, opp}
+  outsScanByName: {}, // lowercase name → {projOuts, line, gamePk, team, opp}
   teamOffenseCache: {},
   ouScanResults: [],
   streakPicks: [],
@@ -2350,6 +2352,9 @@ async function runKsAutoScan(){
   }, 4, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
 
   allResults.sort((a,b)=> b.lambda - a.lambda);
+  // Cache by name for getModelProbForRow lookups
+  state.ksScanByName = {};
+  allResults.forEach(r=>{ state.ksScanByName[r.name.toLowerCase()] = r; });
   window.__lastKsResults=allResults.slice(0,30); renderKsLeaderboard(window.__lastKsResults);
   const ksCandidates = allResults.map(r=>{
     const oddsRow = findPlayerOdds(PROP_MARKET.K, r.name);
@@ -2496,6 +2501,9 @@ async function runOutsAutoScan(){
   }, 4, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
 
   allResults.sort((a,b)=> b.projOuts - a.projOuts);
+  // Cache by name for getModelProbForRow lookups
+  state.outsScanByName = {};
+  allResults.forEach(r=>{ state.outsScanByName[r.name.toLowerCase()] = r; });
   window.__lastOutsResults=allResults.slice(0,30); renderOutsLeaderboard(window.__lastOutsResults);
   renderBestBet('outsBestBet', allResults.map(r=>{
     const oddsRow = findPlayerOdds(PROP_MARKET.OUTS, r.name);
@@ -3017,24 +3025,39 @@ async function runAutoScanSilent(){
 
 async function runKsAutoScanSilent(){
   if(!state.games.length) return;
+  const allResults = [];
   await runChunked(state.games, async (g)=>{
     const opts = getProbablePitcherOptions(g);
     await Promise.all(opts.map(async (o)=>{
       const [pitStats, oppK] = await Promise.all([getPitcherStats(o.id), getTeamKRate(o.oppTeamId)]);
       if(!pitStats || pitStats.blendedK_pct == null || oppK == null) return;
+      const bf = pitStats.blendedBFperStart || 21;
+      const lambda = pitStats.blendedK_pct * ((pitStats.blendedK_pct + oppK) / (2 * LEAGUE_AVG_K_PCT)) * bf;
+      allResults.push({ name:o.name, team:o.team, opp:o.oppAbbr, lambda, bf, gamePk:g.gamePk });
     }));
   }, 4);
+  state.ksScanByName = {};
+  allResults.forEach(r=>{ state.ksScanByName[r.name.toLowerCase()] = r; });
+  window.__lastKsResults = allResults.sort((a,b)=>b.lambda-a.lambda).slice(0,30);
 }
 
 async function runOutsAutoScanSilent(){
   if(!state.games.length) return;
+  const allResults = [];
   await runChunked(state.games, async (g)=>{
     const opts = getProbablePitcherOptions(g);
     await Promise.all(opts.map(async (o)=>{
       const [pitStats, oppOffense] = await Promise.all([getPitcherStats(o.id), getTeamOffenseRate(o.oppTeamId)]);
       if(!pitStats || pitStats.blendedIPperStart == null) return;
+      const oppRPG = oppOffense != null ? oppOffense : LEAGUE_AVG_RUNS_PER_GAME;
+      const offenseFactor = Math.max(0.85, Math.min(1.12, 1 - (oppRPG - LEAGUE_AVG_RUNS_PER_GAME) * 0.02));
+      const projOuts = pitStats.blendedIPperStart * 3 * offenseFactor;
+      allResults.push({ name:o.name, team:o.team, opp:o.oppAbbr, projOuts, offenseFactor, gamePk:g.gamePk });
     }));
   }, 4);
+  state.outsScanByName = {};
+  allResults.forEach(r=>{ state.outsScanByName[r.name.toLowerCase()] = r; });
+  window.__lastOutsResults = allResults.sort((a,b)=>b.projOuts-a.projOuts).slice(0,30);
 }
 
 async function runWinAutoScanSilent(){
@@ -3291,11 +3314,10 @@ function captureLabProps(marketSlug, propType, rows){
 // For K/OUTS: uses pitching stats cache by player name match.
 function getModelProbForRow(propType, row){
   const playerName = row.player_name || row.selection;
+
   if(propType === 'HR'){
-    // Primary: use the scan results cache keyed by lowercase name (populated after scan)
     const scan = state.hrScanByName[playerName?.toLowerCase()];
     if(scan) return scan.prob;
-    // Fallback: try to compute from stats cache if available
     const batStats = Object.values(state.battingStatsCache).find(s=>s._name && s._name.toLowerCase()===playerName?.toLowerCase());
     if(batStats){
       const parkFactor = PARK_FACTORS[row.home_team ? abbrFromName(row.home_team) : ''] || 1.0;
@@ -3304,19 +3326,36 @@ function getModelProbForRow(propType, row){
     }
     return null;
   }
+
   if(propType === 'K'){
-    const pitStats = state.pitchingStatsCache[playerName];
-    if(!pitStats || pitStats.blendedK_pct == null || row.line == null) return null;
-    const bf = pitStats.blendedBFperStart || 21;
-    const lambda = pitStats.blendedK_pct * bf;
-    return 1 - poissonCDF(Math.floor(row.line), lambda);
+    // Use scan cache keyed by name (populated by runKsAutoScan)
+    const scan = state.ksScanByName[playerName?.toLowerCase()];
+    if(scan && row.line != null) return 1 - poissonCDF(Math.floor(row.line), scan.lambda);
+    return null;
   }
+
   if(propType === 'OUTS'){
-    const pitStats = state.pitchingStatsCache[playerName];
-    if(!pitStats || pitStats.blendedIPperStart == null || row.line == null) return null;
-    const projOuts = pitStats.blendedIPperStart * 3;
-    return 1 - normalCDF(row.line, projOuts, OUTS_SD);
+    // Use scan cache keyed by name (populated by runOutsAutoScan)
+    const scan = state.outsScanByName[playerName?.toLowerCase()];
+    if(scan && row.line != null) return 1 - normalCDF(row.line, scan.projOuts, OUTS_SD);
+    return null;
   }
+
+  if(propType === 'WINNER'){
+    // For moneyline rows, selection is the team name
+    if(!state.__winCache) return null;
+    const teamName = row.selection || row.player_name;
+    for(const r of Object.values(state.__winCache)){
+      if(r.awayName === teamName || r.awayAbbr === teamName) return r.awayProb;
+      if(r.homeName === teamName || r.homeAbbr === teamName) return r.homeProb;
+      // Also try last word match (e.g., "Yankees" matches "New York Yankees")
+      const lastWord = (teamName||'').split(' ').pop().toLowerCase();
+      if(r.awayName?.toLowerCase().endsWith(lastWord)) return r.awayProb;
+      if(r.homeName?.toLowerCase().endsWith(lastWord)) return r.homeProb;
+    }
+    return null;
+  }
+
   return null;
 }
 
@@ -3392,14 +3431,54 @@ async function bulkGradeAllPending(){
     alert('No pending picks from past dates to grade. Today\'s picks can only be graded after games finish.');
     return;
   }
+
+  // ── Step 1: Retroactively resolve gamePk for old picks that don't have it ──
+  const scheduleCache = {}; // date → games array
+  const picksWithoutPk = pending.filter(p=>!p.gamePk && p.matchup);
+  if(picksWithoutPk.length){
+    // Group by date to minimize schedule fetches
+    const dates = [...new Set(picksWithoutPk.map(p=>p.date))];
+    for(const date of dates){
+      if(!scheduleCache[date]){
+        const data = await safeFetchJSON(`${API}/schedule?sportId=1&date=${date}&hydrate=team`, `schedule ${date}`);
+        scheduleCache[date] = (data?.dates?.[0]?.games) || [];
+      }
+      const games = scheduleCache[date];
+      picksWithoutPk.filter(p=>p.date===date).forEach(p=>{
+        const parts = (p.matchup||'').split(' @ ');
+        if(parts.length !== 2) return;
+        const [awayStr, homeStr] = parts;
+        const awayWord = awayStr.split(' ').pop().toLowerCase();
+        const homeWord = homeStr.split(' ').pop().toLowerCase();
+        const game = games.find(g=>{
+          const a = g.teams.away.team.name.toLowerCase();
+          const h = g.teams.home.team.name.toLowerCase();
+          return a.includes(awayWord) && h.includes(homeWord);
+        });
+        if(game){
+          // Update both the pending copy and the stored prop
+          p.gamePk = game.gamePk;
+          const stored = props.find(x=>x.id===p.id);
+          if(stored) stored.gamePk = game.gamePk;
+        }
+      });
+    }
+  }
+
+  // ── Step 2: Fetch box scores for all resolved gamePks ─────────────────────
   const statusEl = document.getElementById('labCount');
   let graded = 0;
   const gamePks = [...new Set(pending.map(p=>p.gamePk).filter(Boolean))];
+  if(!gamePks.length){
+    alert('Could not find game IDs for any pending picks. Make sure the matchup field is correct (e.g. "Cubs @ Dodgers").');
+    return;
+  }
   const boxScores = {};
-  for(const pk of gamePks){
+  await Promise.all(gamePks.map(async pk=>{
     const data = await safeFetchJSON(`${API}/game/${pk}/boxscore`, `boxscore ${pk}`);
     if(data) boxScores[pk] = data;
-  }
+  }));
+
   pending.forEach(p=>{
     if(!p.gamePk || !boxScores[p.gamePk]) return;
     const data = boxScores[p.gamePk];
@@ -3912,6 +3991,38 @@ async function autoGradeOnLoad(){
   const props = loadLabProps();
   const pastPending = props.filter(p=>p.status==='pending' && p.date < state.date);
   if(!pastPending.length) return;
+
+  // Resolve missing gamePks from matchup + date (same logic as bulkGradeAllPending)
+  const noGamePk = pastPending.filter(p=>!p.gamePk && p.matchup);
+  if(noGamePk.length){
+    const scheduleCache = {};
+    const dates = [...new Set(noGamePk.map(p=>p.date))];
+    for(const date of dates){
+      if(!scheduleCache[date]){
+        const data = await safeFetchJSON(`${API}/schedule?sportId=1&date=${date}&hydrate=team`, `auto-grade schedule ${date}`);
+        scheduleCache[date] = (data?.dates?.[0]?.games) || [];
+      }
+      const games = scheduleCache[date];
+      noGamePk.filter(p=>p.date===date).forEach(p=>{
+        const parts = (p.matchup||'').split(' @ ');
+        if(parts.length !== 2) return;
+        const [awayStr, homeStr] = parts;
+        const awayWord = awayStr.split(' ').pop().toLowerCase();
+        const homeWord = homeStr.split(' ').pop().toLowerCase();
+        const game = games.find(g=>{
+          const a = g.teams.away.team.name.toLowerCase();
+          const h = g.teams.home.team.name.toLowerCase();
+          return a.includes(awayWord) && h.includes(homeWord);
+        });
+        if(game){
+          p.gamePk = game.gamePk;
+          const stored = props.find(x=>x.id===p.id);
+          if(stored) stored.gamePk = game.gamePk;
+        }
+      });
+    }
+  }
+
   const gamePks = [...new Set(pastPending.map(p=>p.gamePk).filter(Boolean))];
   if(!gamePks.length) return;
   logDebug(`Auto-grading ${pastPending.length} pending picks from past dates…`);
