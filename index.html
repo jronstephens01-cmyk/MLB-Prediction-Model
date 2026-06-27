@@ -688,11 +688,12 @@
 
     <div class="panel">
       <div class="panel-title">Tracked Props <small id="labCount"></small></div>
-      <div class="panel-desc">Auto-captured any time you load live lines and our model sees an edge. Grade after the game to build the reliability record.</div>
+      <div class="panel-desc">Auto-captured any time you load live lines and our model sees an edge. Use the date row to browse previous days.</div>
       <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
         <button id="labBulkGradeBtn" class="primary" style="font-size:12px; padding:7px 12px;">Auto-Grade All Pending from Box Scores</button>
         <button id="labClearGradedBtn" class="ghost" style="font-size:12px; padding:7px 12px;">Clear Graded</button>
       </div>
+      <div id="labDateNav" style="overflow-x:auto; padding-bottom:4px; margin-bottom:8px;"></div>
       <div class="lab-filter-row">
         <button class="lab-filter-btn active" data-filter="all">All</button>
         <button class="lab-filter-btn" data-filter="HR">HR</button>
@@ -757,9 +758,10 @@
     <!-- Full pick log -->
     <div class="panel">
       <div class="panel-title">Full Tracked Log <small id="trackLogCount"></small></div>
+      <div id="trackDateNav" style="overflow-x:auto; padding-bottom:4px; margin-bottom:8px;"></div>
       <div class="lab-filter-row" id="trackFilterRow">
         <button class="lab-filter-btn active" data-tfilter="all">All</button>
-        <button class="lab-filter-btn" data-tfilter="recommended">Recommended Only</button>
+        <button class="lab-filter-btn" data-tfilter="recommended">Recommended</button>
         <button class="lab-filter-btn" data-tfilter="pending">Pending</button>
         <button class="lab-filter-btn" data-tfilter="HR">HR</button>
         <button class="lab-filter-btn" data-tfilter="K">K's</button>
@@ -817,9 +819,18 @@
   <!-- ============ AI ANALYST TAB ============ -->
   <div id="tab-ai" style="display:none;">
 
+    <!-- Deployment Health Check -->
+    <div class="panel">
+      <div class="panel-title">Deployment Status</div>
+      <div class="panel-desc">Verifies your Worker, KV storage, and Anthropic key are all configured correctly. Run this first if anything seems broken.</div>
+      <button class="ghost" id="healthCheckBtn" style="width:100%; margin-bottom:8px;">Run Deployment Check</button>
+      <div id="healthCheckResult"></div>
+    </div>
+
+    <!-- AI Analysis -->
     <div class="panel">
       <div class="panel-title">AI Analyst</div>
-      <div class="panel-desc">Claude reads your entire graded pick history and tells you straight: is this model actually beating the book, which prop types are making money, where the probabilities are off, and exactly what to focus on. Gets smarter as you grade more picks — needs at least 10 graded to say anything meaningful, 50+ to be confident.</div>
+      <div class="panel-desc">Claude reads your entire graded pick history and tells you straight: is this model beating the book, which prop types make money, where the model is miscalibrated, and what to focus on. Needs at least 5 graded picks. Gets sharper at 50+.</div>
       <button class="primary" id="aiAnalyzeBtn" style="width:100%; font-size:15px; padding:12px;">Run AI Analysis</button>
       <div class="progress-text" id="aiStatus"></div>
     </div>
@@ -829,20 +840,27 @@
       <div id="aiAnalysisResult"></div>
     </div>
 
+    <!-- Cloud Sync + Diagnostics -->
     <div class="panel">
-      <div class="panel-title">Cloud Sync <small>auto-grades picks nightly</small></div>
-      <div class="panel-desc">Every pick you capture gets synced to the cloud. The cron job runs at 2 AM PT every night, fetches box scores for all that day's games, and grades every pending pick automatically. You never have to manually grade anything.</div>
-      <div class="odds-status" id="kvSyncStatus">Connecting…</div>
+      <div class="panel-title">Cloud Sync <small>auto-grades picks nightly at 2 AM PT</small></div>
+      <div class="odds-status" id="kvSyncStatus">Tap Sync to connect…</div>
       <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-        <button class="ghost" id="kvSyncNowBtn" style="flex:1;">Sync Now</button>
-        <button class="ghost" id="kvPushNowBtn" style="flex:1;">Push My Picks to Cloud</button>
+        <button class="ghost" id="kvSyncNowBtn" style="flex:1;">Sync from Cloud</button>
+        <button class="ghost" id="kvPushNowBtn" style="flex:1;">Push All Picks to Cloud</button>
       </div>
       <div class="stat-grid" style="margin-top:10px;">
-        <div class="stat-box"><div class="k">Synced Picks</div><div class="v" id="kvPickCount">--</div></div>
+        <div class="stat-box"><div class="k">Cloud Picks</div><div class="v" id="kvPickCount">--</div></div>
         <div class="stat-box"><div class="k">Last Auto-Grade</div><div class="v" id="kvLastGrade">--</div></div>
         <div class="stat-box"><div class="k">Cloud ROI</div><div class="v" id="kvROI">--</div></div>
         <div class="stat-box"><div class="k">Cloud Units</div><div class="v" id="kvUnits">--</div></div>
       </div>
+    </div>
+
+    <!-- Local Data Diagnostic -->
+    <div class="panel">
+      <div class="panel-title">Local Data Diagnostic</div>
+      <div class="panel-desc">Shows what's actually stored on this device. If picks show here but not in cloud, tap "Push All Picks to Cloud".</div>
+      <div id="localDiagnostic"></div>
     </div>
 
   </div>
@@ -2064,18 +2082,20 @@ async function runAutoScan(){
       for(const h of awayHitters){
         if(h.seasonPA < 20) continue;
         const statcastBat = getStatcastForBatter(h.id || h.personId);
-        // Try platoon rate if we have pitcher hand and enough sample
         let batRate = h.blendedRate;
+        let usedPlatoonAway = false;
         if(homeHand && h.id){
           const split = await getPlatoonSplit(h.id, homeHand);
-          if(split && split.pa >= 40) batRate = split.rate;
+          if(split && split.pa >= 40){ batRate = split.rate; usedPlatoonAway = true; }
         }
         const calc = calcConfidence({
           batRate, pitHR9:pitcherStats[homePitcherId].blendedHR9,
           parkFactor, windMph:0, tempFactor, pa:4.1, statcastBat, pitFBRate:homePitFBRate
         });
         allResults.push({ name:h.fullName, id:h.id, team:awayAbbr, opp:homePitcherName,
-          prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date });
+          prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date,
+          usedPlatoon:usedPlatoonAway, statcastBatAdj:calc.statcastBatAdj, fbAdj:calc.fbAdj, parkFactor
+        });
       }
     }
     // Home batters face away pitcher
@@ -2084,16 +2104,19 @@ async function runAutoScan(){
         if(h.seasonPA < 20) continue;
         const statcastBat = getStatcastForBatter(h.id || h.personId);
         let batRate = h.blendedRate;
+        let usedPlatoonHome = false;
         if(awayHand && h.id){
-          const split = await getPlatoonSplit(h.id, awayHand);
-          if(split && split.pa >= 40) batRate = split.rate;
+          const splitH = await getPlatoonSplit(h.id, awayHand);
+          if(splitH && splitH.pa >= 40){ batRate = splitH.rate; usedPlatoonHome = true; }
         }
         const calc = calcConfidence({
           batRate, pitHR9:pitcherStats[awayPitcherId].blendedHR9,
           parkFactor, windMph:0, tempFactor, pa:4.1, statcastBat, pitFBRate:awayPitFBRate
         });
         allResults.push({ name:h.fullName, id:h.id, team:homeAbbr, opp:awayPitcherName,
-          prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date });
+          prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date,
+          usedPlatoon:usedPlatoonHome, statcastBatAdj:calc.statcastBatAdj, fbAdj:calc.fbAdj, parkFactor
+        });
       }
     }
   }, 3, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
@@ -2951,25 +2974,45 @@ async function runAutoScanSilent(){
     const parkFactor = PARK_FACTORS[homeAbbr] != null ? PARK_FACTORS[homeAbbr] : 1.0;
     const weather = await getWeather(homeAbbr);
     const tempFactor = tempFactorFor(weather);
-    const awayPitcherId = g.teams.away.probablePitcher ? g.teams.away.probablePitcher.id : null;
-    const homePitcherId = g.teams.home.probablePitcher ? g.teams.home.probablePitcher.id : null;
+    const awayPitcherId = g.teams.away.probablePitcher?.id;
+    const homePitcherId = g.teams.home.probablePitcher?.id;
     if(!awayPitcherId && !homePitcherId) return;
     const pitcherStats = await getPitchersBatch([awayPitcherId, homePitcherId]);
+    const [awayHand, homeHand] = await Promise.all([
+      awayPitcherId ? getPitcherHand(awayPitcherId) : Promise.resolve(null),
+      homePitcherId ? getPitcherHand(homePitcherId) : Promise.resolve(null)
+    ]);
+    const getFBRate = (s)=>{
+      if(!s?.seasonAirOuts || !s?.seasonGroundOuts) return null;
+      const t=s.seasonAirOuts+s.seasonGroundOuts; return t>50?s.seasonAirOuts/t:null;
+    };
+    const homePitFBRate = homePitcherId ? getFBRate(pitcherStats[homePitcherId]) : null;
+    const awayPitFBRate = awayPitcherId ? getFBRate(pitcherStats[awayPitcherId]) : null;
     const [awayHitters, homeHitters] = await Promise.all([getTeamHittersBatch(away.id), getTeamHittersBatch(home.id)]);
     if(homePitcherId && pitcherStats[homePitcherId]){
-      awayHitters.forEach(h=>{ if(h.seasonPA < 20) return;
-        const calc = calcConfidence({batRate:h.blendedRate, pitHR9:pitcherStats[homePitcherId].blendedHR9, parkFactor, windMph:0, tempFactor, pa:4.1});
-        allResults.push({ name:h.fullName, team:awayAbbr, opp:g.teams.home.probablePitcher ? g.teams.home.probablePitcher.fullName : 'TBD', prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date });
-      });
+      for(const h of awayHitters){ if(h.seasonPA < 20) continue;
+        const statcastBat = getStatcastForBatter(h.id);
+        let batRate = h.blendedRate; let usedPlatoon=false;
+        if(homeHand && h.id){ const sp=await getPlatoonSplit(h.id,homeHand); if(sp&&sp.pa>=40){batRate=sp.rate;usedPlatoon=true;} }
+        const calc = calcConfidence({batRate, pitHR9:pitcherStats[homePitcherId].blendedHR9, parkFactor, windMph:0, tempFactor, pa:4.1, statcastBat, pitFBRate:homePitFBRate});
+        allResults.push({name:h.fullName,id:h.id,team:awayAbbr,opp:g.teams.home.probablePitcher?.fullName||'TBD',prob:calc.gameProb,tag:tagForProb(calc.gameProb),gamePk:g.gamePk,date:state.date,usedPlatoon,statcastBatAdj:calc.statcastBatAdj,fbAdj:calc.fbAdj,parkFactor});
+      }
     }
     if(awayPitcherId && pitcherStats[awayPitcherId]){
-      homeHitters.forEach(h=>{ if(h.seasonPA < 20) return;
-        const calc = calcConfidence({batRate:h.blendedRate, pitHR9:pitcherStats[awayPitcherId].blendedHR9, parkFactor, windMph:0, tempFactor, pa:4.1});
-        allResults.push({ name:h.fullName, team:homeAbbr, opp:g.teams.away.probablePitcher ? g.teams.away.probablePitcher.fullName : 'TBD', prob:calc.gameProb, tag:tagForProb(calc.gameProb), gamePk:g.gamePk, date:state.date });
-      });
+      for(const h of homeHitters){ if(h.seasonPA < 20) continue;
+        const statcastBat = getStatcastForBatter(h.id);
+        let batRate = h.blendedRate; let usedPlatoon=false;
+        if(awayHand && h.id){ const sp=await getPlatoonSplit(h.id,awayHand); if(sp&&sp.pa>=40){batRate=sp.rate;usedPlatoon=true;} }
+        const calc = calcConfidence({batRate, pitHR9:pitcherStats[awayPitcherId].blendedHR9, parkFactor, windMph:0, tempFactor, pa:4.1, statcastBat, pitFBRate:awayPitFBRate});
+        allResults.push({name:h.fullName,id:h.id,team:homeAbbr,opp:g.teams.away.probablePitcher?.fullName||'TBD',prob:calc.gameProb,tag:tagForProb(calc.gameProb),gamePk:g.gamePk,date:state.date,usedPlatoon,statcastBatAdj:calc.statcastBatAdj,fbAdj:calc.fbAdj,parkFactor});
+      }
     }
   }, 3);
   allResults.sort((a,b)=>b.prob-a.prob);
+  // Populate hrScanByName so conviction system and Pay The Tab can access results
+  state.hrScanByName = {};
+  allResults.forEach(r=>{ state.hrScanByName[r.name.toLowerCase()]=r; });
+  window.__lastHrResults = allResults.slice(0,30);
 }
 
 async function runKsAutoScanSilent(){
@@ -3001,6 +3044,18 @@ async function runWinAutoScanSilent(){
     const r = await computeWinProbForGame(g);
     if(r) state.__winCache[r.gamePk] = r;
   }, 4);
+}
+
+async function runOUScanSilent(){
+  if(!state.games.length) return;
+  const results = [];
+  await runChunked(state.games, async g=>{
+    const r = await projectGameOUTotal(g);
+    if(r) results.push(r);
+  }, 4);
+  results.sort((a,b)=> b.totalProj - a.totalProj);
+  state.ouScanResults = results;
+  window.__lastWinResults = window.__lastWinResults || [];
 }
 
 function renderParlayLegsBlock(legs, containerId, removeFunc, labelId){
@@ -3415,11 +3470,15 @@ function renderLab(){
   // Build reliability stats
   renderLabReliability(allProps);
 
+  // Date navigation
+  renderDateNav('labDateNav', labDateFilter, (d)=>{ labDateFilter=d; renderLab(); });
+
   // Apply filter
   let filtered = allProps;
-  if(labFilter === 'pending') filtered = allProps.filter(p=>p.status==='pending');
-  else if(labFilter === 'strong') filtered = allProps.filter(p=>p.tier==='strong');
-  else if(['HR','K','OUTS','WINNER'].includes(labFilter)) filtered = allProps.filter(p=>p.propType===labFilter);
+  if(labDateFilter) filtered = filtered.filter(p=>p.date===labDateFilter);
+  if(labFilter === 'pending') filtered = filtered.filter(p=>p.status==='pending');
+  else if(labFilter === 'strong') filtered = filtered.filter(p=>p.tier==='strong');
+  else if(['HR','K','OUTS','WINNER'].includes(labFilter)) filtered = filtered.filter(p=>p.propType===labFilter);
 
   filtered = [...filtered].sort((a,b)=> new Date(b.date)-new Date(a.date) || b.edge-a.edge);
 
@@ -3798,10 +3857,14 @@ function renderTracking(){
   const countEl = document.getElementById('trackLogCount');
   if(!logEl) return;
 
+  // Render date navigation
+  renderDateNav('trackDateNav', trackDateFilter, (d)=>{ trackDateFilter=d; renderTracking(); });
+
   let filtered = allProps;
-  if(trackFilter==='recommended') filtered = allProps.filter(p=>p.recommended);
-  else if(trackFilter==='pending') filtered = allProps.filter(p=>p.status==='pending');
-  else if(['HR','K','OUTS','WINNER'].includes(trackFilter)) filtered = allProps.filter(p=>p.propType===trackFilter);
+  if(trackDateFilter) filtered = filtered.filter(p=>p.date===trackDateFilter);
+  if(trackFilter==='recommended') filtered = filtered.filter(p=>p.recommended);
+  else if(trackFilter==='pending') filtered = filtered.filter(p=>p.status==='pending');
+  else if(['HR','K','OUTS','WINNER'].includes(trackFilter)) filtered = filtered.filter(p=>p.propType===trackFilter);
   filtered = [...filtered].sort((a,b)=>new Date(b.date)-new Date(a.date)||b.edge-a.edge);
   if(countEl) countEl.textContent = `${filtered.length} of ${allProps.length}`;
 
@@ -4824,29 +4887,53 @@ async function loadAllLiveLines(){
   const btn = document.getElementById('loadAllLinesBtn');
   const statusEl = document.getElementById('globalLinesStatus');
   btn.disabled = true; btn.textContent = 'Loading…';
-  statusEl.style.display = 'block'; statusEl.textContent = 'Loading live lines for all markets…';
+  statusEl.style.display = 'block';
 
+  // Step 1: Load all markets in parallel
+  statusEl.textContent = 'Step 1/2 · Loading live lines for all markets…';
   const markets = [
     { slug: PROP_MARKET.HR,   statusId: 'hrOddsStatus',   label: 'HR' },
-    { slug: PROP_MARKET.K,    statusId: 'ksOddsStatus',   label: 'K\'s' },
+    { slug: PROP_MARKET.K,    statusId: 'ksOddsStatus',   label: "K's" },
     { slug: PROP_MARKET.OUTS, statusId: 'outsOddsStatus', label: 'Outs' },
-    { slug: 'moneyline',      statusId: 'winOddsStatus',  label: 'Moneyline' },
+    { slug: 'moneyline',      statusId: 'winOddsStatus',  label: 'ML' },
     { slug: TOTAL_MARKET,     statusId: 'ouOddsStatus',   label: 'Totals' }
   ];
-
   const results = await Promise.all(markets.map(m => loadLiveOdds(m.slug, m.statusId)));
-
   const counts = results.map((rows, i) => `${markets[i].label} ${rows.length}`);
-  statusEl.textContent = `Lines loaded: ${counts.join(' · ')}`;
-  btn.disabled = false; btn.textContent = 'Load All Lines';
+  statusEl.textContent = `Lines loaded: ${counts.join(' · ')} · Step 2/2: Running all scans…`;
 
-  // Refresh any leaderboard that's already been scanned
+  // Step 2: Make sure schedule is loaded, then run all scans in parallel
+  if(!state.games.length) await loadSchedule(state.date);
+
+  // Load Statcast once for all scans
+  if(!state.statcastLoaded){
+    statusEl.textContent = `Lines loaded · Loading Statcast data…`;
+    await loadStatcast();
+  }
+
+  await Promise.all([
+    runAutoScanSilent(),
+    runKsAutoScanSilent(),
+    runOutsAutoScanSilent(),
+    runWinAutoScanSilent(),
+    runOUScanSilent()
+  ]);
+
+  // Refresh any leaderboard already rendered
   if(window.__lastHrResults?.length)   renderLeaderboard(window.__lastHrResults);
   if(window.__lastKsResults?.length)   renderKsLeaderboard(window.__lastKsResults);
   if(window.__lastOutsResults?.length) renderOutsLeaderboard(window.__lastOutsResults);
   if(window.__lastWinResults?.length)  renderWinLeaderboard(window.__lastWinResults);
   if(state.ouScanResults?.length)      renderOULeaderboard(state.ouScanResults);
   renderHRPropsBoard();
+  renderStreakTab();
+
+  const totalCandidates = Object.keys(state.hrScanByName).length +
+    (window.__lastKsResults?.length||0) + (window.__lastOutsResults?.length||0) +
+    Object.keys(state.__winCache||{}).length;
+
+  statusEl.textContent = `✅ All lines loaded · All scans complete · ${totalCandidates} candidates across all tabs · Props Lab capturing edge plays`;
+  btn.disabled = false; btn.textContent = 'Load All Lines';
 }
 
 /* =========================================================================
@@ -4857,9 +4944,9 @@ async function loadAllLiveLines(){
 function calcConvictionSignals(playerName, modelProb, oddsRow){
   const signals = [];
   let score = 0;
+  const scan = state.hrScanByName[playerName.toLowerCase()];
 
-  // ── Statcast quality — barrel rate is the strongest predictor ─────────────
-  // Find by matching name in the Statcast cache (keyed by personId)
+  // ── Statcast barrel rate — strongest single predictor ─────────────────────
   const scEntry = Object.entries(state.statcastBatters||{}).find(([,s])=>
     s.name && (s.name.toLowerCase()===playerName.toLowerCase() ||
                playerName.toLowerCase().includes(s.name.toLowerCase().split(' ').pop()))
@@ -4867,50 +4954,56 @@ function calcConvictionSignals(playerName, modelProb, oddsRow){
   if(scEntry){
     const sc = scEntry[1];
     if(sc.barrelRate != null){
-      const barrelRel = sc.barrelRate / LEAGUE_AVG_BARREL_RATE;
-      if(barrelRel >= 1.8){ signals.push('🔴 Elite barrel rate'); score += 3; }
-      else if(barrelRel >= 1.3){ signals.push('🟠 High barrel rate'); score += 2; }
-      else if(barrelRel >= 1.1){ signals.push('🟡 Above-avg barrel rate'); score += 1; }
-      else if(barrelRel < 0.7){ signals.push('⚪ Low barrel rate'); score -= 1; }
+      const rel = sc.barrelRate / LEAGUE_AVG_BARREL_RATE;
+      if(rel >= 1.8){ signals.push('🔴 Elite barrel rate'); score += 3; }
+      else if(rel >= 1.3){ signals.push('🟠 High barrel rate'); score += 2; }
+      else if(rel >= 1.1){ signals.push('🟡 Above-avg barrel rate'); score += 1; }
+      else if(rel < 0.7){ signals.push('⚪ Low barrel rate'); score -= 1; }
     }
     if(sc.hardHitPct != null && sc.hardHitPct > LEAGUE_AVG_HARD_HIT * 1.2){
       signals.push('💥 High hard-hit rate'); score += 1;
     }
+  } else if(scan?.statcastBatAdj != null){
+    // Use the stored adjustment from scan as a proxy when we don't have raw Statcast
+    if(scan.statcastBatAdj >= 1.25){ signals.push('🟠 Statcast quality: well above avg'); score += 2; }
+    else if(scan.statcastBatAdj >= 1.10){ signals.push('🟡 Statcast quality: above avg'); score += 1; }
+    else if(scan.statcastBatAdj < 0.85){ signals.push('⚪ Statcast quality: below avg'); score -= 1; }
+  }
+
+  // ── Pitcher fly ball tendency ──────────────────────────────────────────────
+  if(scan?.fbAdj != null){
+    if(scan.fbAdj >= 1.15){ signals.push('🎯 Fly-ball pitcher (HR-prone)'); score += 2; }
+    else if(scan.fbAdj >= 1.07){ signals.push('↗️ Slightly fly-ball pitcher'); score += 1; }
+    else if(scan.fbAdj <= 0.85){ signals.push('⬇️ Ground-ball pitcher (suppresses HRs)'); score -= 1; }
+  }
+
+  // ── Platoon advantage ──────────────────────────────────────────────────────
+  if(scan?.usedPlatoon){ signals.push('🎯 Favorable platoon matchup (40+ PA sample)'); score += 2; }
+
+  // ── Park factor ────────────────────────────────────────────────────────────
+  const pf = scan?.parkFactor;
+  if(pf != null){
+    if(pf >= 1.10){ signals.push('🏟️ Hitter-friendly park'); score += 1; }
+    else if(pf <= 0.92){ signals.push('🛡️ Pitcher-friendly park'); score -= 1; }
   }
 
   // ── Edge vs book — value confirmation ─────────────────────────────────────
   if(oddsRow && modelProb != null){
     const edge = modelProb - oddsRow.odds_probability;
-    if(edge >= 0.07){ signals.push('💰 Strong edge vs book'); score += 3; }
-    else if(edge >= 0.04){ signals.push('✅ Positive edge vs book'); score += 2; }
-    else if(edge >= 0.01){ signals.push('📊 Slight edge'); score += 1; }
+    if(edge >= 0.07){ signals.push('💰 Strong edge vs book (+7pt)'); score += 3; }
+    else if(edge >= 0.04){ signals.push('✅ Positive edge vs book (+4pt)'); score += 2; }
+    else if(edge >= 0.01){ signals.push('📊 Slight edge vs book'); score += 1; }
     else { signals.push('❌ Book has the edge'); score -= 2; }
   }
 
   // ── Model probability tier ─────────────────────────────────────────────────
   if(modelProb != null){
-    if(modelProb >= 0.20){ signals.push('🔥 Model: elite HR likelihood'); score += 2; }
-    else if(modelProb >= 0.15){ signals.push('⚡ Model: strong HR likelihood'); score += 1; }
+    if(modelProb >= 0.20){ signals.push('🔥 Elite HR probability (20%+)'); score += 2; }
+    else if(modelProb >= 0.15){ signals.push('⚡ Strong HR probability (15%+)'); score += 1; }
   }
 
-  // ── Platoon split check ────────────────────────────────────────────────────
-  // Look for a platoon split that's better than season avg
-  const scanEntry = state.hrScanByName[playerName.toLowerCase()];
-  if(scanEntry?.usedPlatoon){ signals.push('🎯 Favorable platoon matchup'); score += 2; }
-
-  // ── Park factor ────────────────────────────────────────────────────────────
-  if(scanEntry?.gamePk){
-    const game = state.games?.find(g=>g.gamePk===scanEntry.gamePk);
-    if(game){
-      const homeAbbr = abbrForTeam(game.teams.home.team);
-      const pf = PARK_FACTORS[homeAbbr] || 1.0;
-      if(pf >= 1.10){ signals.push('🏟️ Hitter-friendly park'); score += 1; }
-      else if(pf <= 0.92){ signals.push('🛡️ Pitcher-friendly park'); score -= 1; }
-    }
-  }
-
-  const level = score >= 7 ? 'High Conviction' : score >= 4 ? 'Medium Conviction' : score >= 2 ? 'Building Case' : 'Insufficient Data';
-  const levelColor = score >= 7 ? '#7CC68A' : score >= 4 ? 'var(--mustard)' : score >= 2 ? 'var(--chalk-dim)' : 'var(--cold)';
+  const level = score >= 8 ? 'HIGH CONVICTION' : score >= 5 ? 'Medium Conviction' : score >= 3 ? 'Building Case' : 'Insufficient Data';
+  const levelColor = score >= 8 ? '#7CC68A' : score >= 5 ? 'var(--mustard)' : score >= 3 ? 'var(--chalk-dim)' : 'var(--cold)';
 
   return { score, signals, level, levelColor };
 }
@@ -4924,6 +5017,126 @@ function convictionBadgeHTML(playerName, modelProb, oddsRow){
       <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);margin-top:3px;line-height:1.6;">${signals.join('<br>')}</div>
     </div>
   `;
+}
+
+/* =========================================================================
+   DATE NAVIGATION — browse previous dates in Tracking and Props Lab
+   ========================================================================= */
+let trackDateFilter = '';   // '' = all dates
+let labDateFilter = '';
+
+function getPickDates(){
+  const props = loadLabProps();
+  return [...new Set(props.map(p=>p.date))].sort().reverse();
+}
+
+function renderDateNav(containerId, selectedDate, onSelect){
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  const dates = getPickDates();
+  if(!dates.length){ el.innerHTML=''; return; }
+  const allActive = !selectedDate ? 'active' : '';
+  let html = `<div style="display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px;">`;
+  html += `<button class="lab-filter-btn ${allActive}" data-date="">All Dates</button>`;
+  dates.forEach(d=>{
+    const active = selectedDate===d ? 'active' : '';
+    const label = d === state.date ? 'Today' : d;
+    html += `<button class="lab-filter-btn ${active}" data-date="${d}" style="white-space:nowrap;">${label}</button>`;
+  });
+  html += '</div>';
+  el.innerHTML = html;
+  el.querySelectorAll('[data-date]').forEach(btn=>{
+    btn.addEventListener('click', ()=> onSelect(btn.dataset.date));
+  });
+}
+
+/* =========================================================================
+   DEPLOYMENT HEALTH CHECK
+   ========================================================================= */
+async function runHealthCheck(){
+  const btn = document.getElementById('healthCheckBtn');
+  const resultEl = document.getElementById('healthCheckResult');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  resultEl.innerHTML = '<div class="empty-state">Testing Worker endpoints…</div>';
+
+  const checks = [];
+
+  // 1. Worker reachable
+  try{
+    const r = await fetch(`${WORKER_BASE}/health`, { signal: AbortSignal.timeout(5000) });
+    const data = r.ok ? await r.json() : null;
+    if(data && data.version === 'v4'){
+      checks.push({ label:'Worker v4 deployed', ok:true, detail:`Version: ${data.version}` });
+      checks.push({ label:'KV namespace bound', ok:!!data.kv, detail: data.kv ? 'MLB_PICKS connected' : '❌ KV not bound — follow setup guide Step 2' });
+      checks.push({ label:'Anthropic API key set', ok:!!data.anthropic, detail: data.anthropic ? 'ANTHROPIC_API_KEY found' : '❌ Add ANTHROPIC_API_KEY secret — setup guide Step 3' });
+      checks.push({ label:'Cron trigger', ok:data.cron||false, detail: data.cron ? `Scheduled: ${data.cron}` : '⚠️ Add cron trigger 0 9 * * * in Worker Triggers' });
+    } else if(r.ok){
+      checks.push({ label:'Worker reachable', ok:true, detail:'Old Worker code detected — needs v4 update' });
+      checks.push({ label:'Worker v4 not deployed', ok:false, detail:'Paste mlb-worker-v4-agent.js into the Worker editor and deploy' });
+    } else {
+      throw new Error(`HTTP ${r.status}`);
+    }
+  } catch(e){
+    checks.push({ label:'Worker reachable', ok:false, detail:`Error: ${e.message} — check Worker is deployed` });
+  }
+
+  // 2. KV picks sync test
+  try{
+    const r = await fetch(`${WORKER_BASE}/picks/stats`, { signal: AbortSignal.timeout(5000) });
+    if(r.ok){
+      const stats = await r.json();
+      checks.push({ label:'KV picks sync', ok:true, detail:`${stats.totalGraded||0} picks graded in cloud, last update: ${stats.lastUpdated ? new Date(stats.lastUpdated).toLocaleDateString() : 'never (cron hasn\'t run yet)'}` });
+    } else { throw new Error(`HTTP ${r.status}`); }
+  } catch(e){
+    checks.push({ label:'KV picks sync', ok:false, detail:`Cannot read KV: ${e.message}` });
+  }
+
+  // 3. Local data check
+  const localProps = loadLabProps();
+  const withGamePk = localProps.filter(p=>p.gamePk);
+  const withoutGamePk = localProps.filter(p=>!p.gamePk && p.propType==='HR');
+  checks.push({
+    label:'Local Props Lab data',
+    ok:localProps.length > 0,
+    detail:`${localProps.length} total props · ${withGamePk.length} have gamePk (auto-gradeable) · ${withoutGamePk.length} HR props missing gamePk`
+  });
+
+  resultEl.innerHTML = checks.map(c=>`
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:8px;border-bottom:1px solid var(--line);">
+      <div style="font-size:18px;flex-shrink:0;">${c.ok?'✅':'❌'}</div>
+      <div>
+        <div style="font-weight:700;font-size:13px;">${c.label}</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--chalk-dim);margin-top:2px;">${c.detail}</div>
+      </div>
+    </div>
+  `).join('');
+
+  btn.disabled = false; btn.textContent = 'Run Deployment Check';
+}
+
+/* =========================================================================
+   LOCAL DATA DIAGNOSTIC
+   ========================================================================= */
+function renderLocalDiagnostic(){
+  const el = document.getElementById('localDiagnostic');
+  if(!el) return;
+  const props = loadLabProps();
+  if(!props.length){
+    el.innerHTML = '<div class="empty-state">No props in local storage. Tap "Load All Lines" on the main header to start capturing.</div>';
+    return;
+  }
+  const byDate = {};
+  props.forEach(p=>{ if(!byDate[p.date]) byDate[p.date]={total:0,pending:0,win:0,loss:0,noGamePk:0}; const d=byDate[p.date]; d.total++; d[p.status]=(d[p.status]||0)+1; if(p.status==='pending') d.pending++; if(!p.gamePk) d.noGamePk++; });
+  const dates = Object.keys(byDate).sort().reverse();
+  el.innerHTML = `<table class="roi-table">
+    <tr><th>Date</th><th>Props</th><th>Pending</th><th>W-L</th><th>gamePk ⚠️</th></tr>
+    ${dates.map(d=>{
+      const s=byDate[d];
+      const warn = s.noGamePk > 0 ? `<span style="color:var(--mustard);">${s.noGamePk} missing</span>` : '<span style="color:#7CC68A;">all good</span>';
+      return `<tr><td>${d=== state.date?'<b>Today</b>':d}</td><td>${s.total}</td><td>${s.pending||0}</td><td>${s.win||0}W-${s.loss||0}L</td><td>${warn}</td></tr>`;
+    }).join('')}
+  </table>
+  <div class="reliability-detail" style="margin-top:8px;">⚠️ Props missing gamePk cannot be auto-graded by the cron. They happened because lines were loaded before the schedule. Going forward, tap "Load All Lines" after the schedule loads.</div>`;
 }
 
 function wireTabs(){
@@ -4941,7 +5154,7 @@ function wireTabs(){
       if(btn.dataset.tab === 'lab') renderLab();
       if(btn.dataset.tab === 'paytab') renderPTCards();
       if(btn.dataset.tab === 'streak') renderStreakTab();
-      if(btn.dataset.tab === 'ai'){ loadKVStats(); }
+      if(btn.dataset.tab === 'ai'){ loadKVStats(); renderLocalDiagnostic(); }
     });
   });
 }
@@ -5079,6 +5292,7 @@ function init(){
 
   // AI Analyst + KV sync
   document.getElementById('aiAnalyzeBtn').addEventListener('click', runAIAnalysis);
+  document.getElementById('healthCheckBtn').addEventListener('click', runHealthCheck);
   document.getElementById('kvSyncNowBtn').addEventListener('click', syncFromKV);
   document.getElementById('kvPushNowBtn').addEventListener('click', async ()=>{
     const allProps = loadLabProps();
