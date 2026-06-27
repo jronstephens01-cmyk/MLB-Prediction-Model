@@ -268,7 +268,13 @@
   .log-line.err{color:var(--clay-2);}
   .log-line.ok{color:#7CC68A;}
 
-  .empty-state{color:var(--chalk-dim); font-size:13px; text-align:center; padding:20px 10px;}
+  .conviction-badge{display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;}
+  .conviction-5{background:rgba(124,198,138,0.2);color:#7CC68A;border:1px solid #7CC68A;}
+  .conviction-4{background:rgba(124,198,138,0.1);color:#7CC68A;border:1px solid rgba(124,198,138,0.4);}
+  .conviction-3{background:rgba(232,163,61,0.12);color:var(--mustard);border:1px solid rgba(232,163,61,0.4);}
+  .conviction-2{background:rgba(244,241,234,0.06);color:var(--chalk-dim);border:1px solid var(--line-strong);}
+  .conviction-1{background:rgba(74,111,165,0.1);color:var(--cold);border:1px solid rgba(74,111,165,0.3);}
+  .conviction-dot{width:6px;height:6px;border-radius:50%;display:inline-block;}
   .footer-note{text-align:center; color:var(--chalk-dim); font-size:11px; font-family:var(--mono); padding:20px 0 30px;}
 </style>
 </head>
@@ -285,9 +291,11 @@
     </div>
     <div class="header-controls">
       <input type="date" id="datePicker">
+      <button id="loadAllLinesBtn" style="background:var(--mustard);color:var(--ink);border-color:var(--mustard);font-weight:700;">Load All Lines</button>
       <button id="refreshBtn">Refresh</button>
     </div>
   </div>
+  <div id="globalLinesStatus" style="display:none;font-family:var(--mono);font-size:11px;color:var(--chalk-dim);padding:4px 16px 8px;border-bottom:1px solid var(--line);"></div>
 </header>
 
 <nav class="tabs">
@@ -416,6 +424,7 @@
           <div class="stat-box"><div class="k">Proj. PA (lineup)</div><div class="v" id="outPA">--</div></div>
         </div>
         <div id="hrEdgeBlock"></div>
+        <div id="hrConvictionBlock"></div>
       </div>
       <div class="two-col" style="margin-top:12px;">
         <button id="savePickBtn">Save to Tracking</button>
@@ -1966,6 +1975,13 @@ async function runCalculation(){
   const hrOddsRow = findPlayerOdds(PROP_MARKET.HR, batterName.split(' (')[0]);
   renderEdgeBlock('hrEdgeBlock', hrOddsRow, calc.gameProb);
 
+  // Conviction signals — show what the data says, not just the odds
+  const conviction = calcConvictionSignals(batterName.split(' (')[0], calc.gameProb, hrOddsRow);
+  const convEl = document.getElementById('hrConvictionBlock');
+  if(convEl && conviction.signals.length){
+    convEl.innerHTML = convictionBadgeHTML(batterName.split(' (')[0], calc.gameProb, hrOddsRow);
+  } else if(convEl){ convEl.innerHTML = ''; }
+
   window.__lastCalc = {
     propType:'HR', batterName, pitcherName, gameProb:calc.gameProb, tag:tag.label,
     gamePk:state.selectedGame?state.selectedGame.gamePk:null, date:state.date, oddsRow:hrOddsRow
@@ -2122,18 +2138,33 @@ function renderLeaderboard(results){
   const eg = document.getElementById('hrEdgeGateRow'); if(eg) eg.style.display = hasLines?'flex':'none';
   if(!results.length){ wrap.innerHTML = '<div class="empty-state">No results — probable pitchers or rosters may not be loaded yet.</div>'; return; }
   wrap.innerHTML = '';
+
+  // When lines are loaded, re-sort by conviction score (data-driven) not raw probability
+  let sorted = [...results];
+  if(hasLines){
+    sorted.sort((a,b)=>{
+      const aOdds = findPlayerOdds(PROP_MARKET.HR, a.name);
+      const bOdds = findPlayerOdds(PROP_MARKET.HR, b.name);
+      const aScore = calcConvictionSignals(a.name, a.prob, aOdds).score;
+      const bScore = calcConvictionSignals(b.name, b.prob, bOdds).score;
+      return bScore - aScore;
+    });
+  }
+
   let shown = 0;
-  results.forEach((r,i)=>{
+  sorted.forEach((r,i)=>{
     const oddsRow = hasLines ? findPlayerOdds(PROP_MARKET.HR, r.name) : null;
     const edge = oddsRow ? r.prob - oddsRow.odds_probability : null;
     if(edgeGate && (edge===null||edge<0.03)) return;
     shown++;
+    const { score, level, levelColor } = calcConvictionSignals(r.name, r.prob, oddsRow);
     const row = document.createElement('div');
     row.className = 'leaderboard-row'+(hasLines&&edge!==null&&edge<0?' lb-dimmed':'');
     row.innerHTML = `<div class="rank">${i+1}</div>
       <div class="lb-main">
         <div class="lb-name">${r.name} <span style="color:var(--chalk-dim); font-weight:400;">(${r.team})</span></div>
         <div class="lb-meta">vs ${r.opp}</div>
+        ${score >= 2 ? `<div style="font-family:var(--mono);font-size:10px;color:${levelColor};margin-top:2px;">● ${level} · ${score} signals</div>` : ''}
       </div>
       <div class="lb-right">
         <div class="lb-score" style="color:${r.tag.color};">${pct(r.prob)}</div>
@@ -2148,7 +2179,7 @@ function renderLeaderboard(results){
   if(!shown) wrap.innerHTML = '<div class="empty-state">No Take-rated plays found. Try unchecking the edge filter, or wait for sharper lines.</div>';
   const hint = document.createElement('div');
   hint.className = 'panel-desc'; hint.style.marginTop = '8px';
-  hint.textContent = hasLines ? 'Green = Take (4+pt edge). Dimmed = book has better info. Tap to save.' : 'Load live lines above to see real edge on each play.';
+  hint.textContent = hasLines ? 'Sorted by conviction score — multiple data signals aligned. Tap to save.' : 'Load live lines above to see conviction scores and edge vs book.';
   wrap.appendChild(hint);
 }
 
@@ -4136,8 +4167,13 @@ function buildPayoffParlay(){
     });
   }
 
-  // Sort: best model probability first
-  candidates.sort((a,b)=> b.modelProb - a.modelProb);
+  // Sort by conviction score (multiple data signals > raw probability)
+  candidates.forEach(c=>{
+    const oddsRowForConv = c.propType==='HR' ? findPlayerOdds(PROP_MARKET.HR, c.playerName) : null;
+    c.convictionScore = calcConvictionSignals(c.playerName, c.modelProb, oddsRowForConv).score;
+    c.convictionData = calcConvictionSignals(c.playerName, c.modelProb, oddsRowForConv);
+  });
+  candidates.sort((a,b)=> b.convictionScore - a.convictionScore || b.modelProb - a.modelProb);
 
   const hasAnyLines = hrRows.length || mlRows.length || (state.liveOdds[PROP_MARKET.K]||[]).length;
   if(!hasAnyLines){
@@ -4197,6 +4233,7 @@ function buildPayoffParlay(){
             <div>
               <div style="font-weight:700;font-size:12px;"><span class="type-chip">${l.propType}</span>${l.playerName}</div>
               <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);">${l.matchup} · ${l.detail} · model ${pct(l.modelProb)} · edge ${l.edge>=0?'+':''}${(l.edge*100).toFixed(1)}pt</div>
+              ${l.convictionData && l.convictionData.signals.length ? `<div style="font-family:var(--mono);font-size:10px;color:${l.convictionData.levelColor};margin-top:2px;">● ${l.convictionData.level} · ${l.convictionData.signals.slice(0,2).join(' · ')}</div>` : ''}
             </div>
             <div style="font-family:var(--mono);font-weight:700;font-size:14px;color:${l.modelProb>=0.55?'#7CC68A':l.modelProb>=0.40?'var(--mustard)':l.modelProb>=0.15?'var(--chalk)':'var(--chalk-dim)'};">
               ${l.oddsAmerican>0?'+':''}${l.oddsAmerican}
@@ -4780,6 +4817,115 @@ async function runAIAnalysis(){
   btn.disabled = false; btn.textContent = 'Run AI Analysis';
 }
 
+/* =========================================================================
+   GLOBAL LOAD ALL LINES — loads every market in parallel, one tap
+   ========================================================================= */
+async function loadAllLiveLines(){
+  const btn = document.getElementById('loadAllLinesBtn');
+  const statusEl = document.getElementById('globalLinesStatus');
+  btn.disabled = true; btn.textContent = 'Loading…';
+  statusEl.style.display = 'block'; statusEl.textContent = 'Loading live lines for all markets…';
+
+  const markets = [
+    { slug: PROP_MARKET.HR,   statusId: 'hrOddsStatus',   label: 'HR' },
+    { slug: PROP_MARKET.K,    statusId: 'ksOddsStatus',   label: 'K\'s' },
+    { slug: PROP_MARKET.OUTS, statusId: 'outsOddsStatus', label: 'Outs' },
+    { slug: 'moneyline',      statusId: 'winOddsStatus',  label: 'Moneyline' },
+    { slug: TOTAL_MARKET,     statusId: 'ouOddsStatus',   label: 'Totals' }
+  ];
+
+  const results = await Promise.all(markets.map(m => loadLiveOdds(m.slug, m.statusId)));
+
+  const counts = results.map((rows, i) => `${markets[i].label} ${rows.length}`);
+  statusEl.textContent = `Lines loaded: ${counts.join(' · ')}`;
+  btn.disabled = false; btn.textContent = 'Load All Lines';
+
+  // Refresh any leaderboard that's already been scanned
+  if(window.__lastHrResults?.length)   renderLeaderboard(window.__lastHrResults);
+  if(window.__lastKsResults?.length)   renderKsLeaderboard(window.__lastKsResults);
+  if(window.__lastOutsResults?.length) renderOutsLeaderboard(window.__lastOutsResults);
+  if(window.__lastWinResults?.length)  renderWinLeaderboard(window.__lastWinResults);
+  if(state.ouScanResults?.length)      renderOULeaderboard(state.ouScanResults);
+  renderHRPropsBoard();
+}
+
+/* =========================================================================
+   CONVICTION SIGNAL SYSTEM
+   Multiple independent data signals pointing the same direction = conviction.
+   This is what separates "this will happen" from "this might happen."
+   ========================================================================= */
+function calcConvictionSignals(playerName, modelProb, oddsRow){
+  const signals = [];
+  let score = 0;
+
+  // ── Statcast quality — barrel rate is the strongest predictor ─────────────
+  // Find by matching name in the Statcast cache (keyed by personId)
+  const scEntry = Object.entries(state.statcastBatters||{}).find(([,s])=>
+    s.name && (s.name.toLowerCase()===playerName.toLowerCase() ||
+               playerName.toLowerCase().includes(s.name.toLowerCase().split(' ').pop()))
+  );
+  if(scEntry){
+    const sc = scEntry[1];
+    if(sc.barrelRate != null){
+      const barrelRel = sc.barrelRate / LEAGUE_AVG_BARREL_RATE;
+      if(barrelRel >= 1.8){ signals.push('🔴 Elite barrel rate'); score += 3; }
+      else if(barrelRel >= 1.3){ signals.push('🟠 High barrel rate'); score += 2; }
+      else if(barrelRel >= 1.1){ signals.push('🟡 Above-avg barrel rate'); score += 1; }
+      else if(barrelRel < 0.7){ signals.push('⚪ Low barrel rate'); score -= 1; }
+    }
+    if(sc.hardHitPct != null && sc.hardHitPct > LEAGUE_AVG_HARD_HIT * 1.2){
+      signals.push('💥 High hard-hit rate'); score += 1;
+    }
+  }
+
+  // ── Edge vs book — value confirmation ─────────────────────────────────────
+  if(oddsRow && modelProb != null){
+    const edge = modelProb - oddsRow.odds_probability;
+    if(edge >= 0.07){ signals.push('💰 Strong edge vs book'); score += 3; }
+    else if(edge >= 0.04){ signals.push('✅ Positive edge vs book'); score += 2; }
+    else if(edge >= 0.01){ signals.push('📊 Slight edge'); score += 1; }
+    else { signals.push('❌ Book has the edge'); score -= 2; }
+  }
+
+  // ── Model probability tier ─────────────────────────────────────────────────
+  if(modelProb != null){
+    if(modelProb >= 0.20){ signals.push('🔥 Model: elite HR likelihood'); score += 2; }
+    else if(modelProb >= 0.15){ signals.push('⚡ Model: strong HR likelihood'); score += 1; }
+  }
+
+  // ── Platoon split check ────────────────────────────────────────────────────
+  // Look for a platoon split that's better than season avg
+  const scanEntry = state.hrScanByName[playerName.toLowerCase()];
+  if(scanEntry?.usedPlatoon){ signals.push('🎯 Favorable platoon matchup'); score += 2; }
+
+  // ── Park factor ────────────────────────────────────────────────────────────
+  if(scanEntry?.gamePk){
+    const game = state.games?.find(g=>g.gamePk===scanEntry.gamePk);
+    if(game){
+      const homeAbbr = abbrForTeam(game.teams.home.team);
+      const pf = PARK_FACTORS[homeAbbr] || 1.0;
+      if(pf >= 1.10){ signals.push('🏟️ Hitter-friendly park'); score += 1; }
+      else if(pf <= 0.92){ signals.push('🛡️ Pitcher-friendly park'); score -= 1; }
+    }
+  }
+
+  const level = score >= 7 ? 'High Conviction' : score >= 4 ? 'Medium Conviction' : score >= 2 ? 'Building Case' : 'Insufficient Data';
+  const levelColor = score >= 7 ? '#7CC68A' : score >= 4 ? 'var(--mustard)' : score >= 2 ? 'var(--chalk-dim)' : 'var(--cold)';
+
+  return { score, signals, level, levelColor };
+}
+
+function convictionBadgeHTML(playerName, modelProb, oddsRow){
+  const { score, signals, level, levelColor } = calcConvictionSignals(playerName, modelProb, oddsRow);
+  if(!signals.length) return '';
+  return `
+    <div style="margin-top:6px;padding:8px;background:rgba(244,241,234,0.04);border-radius:6px;border-left:2px solid ${levelColor};">
+      <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:${levelColor};text-transform:uppercase;letter-spacing:0.5px;">${level} · ${score} signals</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);margin-top:3px;line-height:1.6;">${signals.join('<br>')}</div>
+    </div>
+  `;
+}
+
 function wireTabs(){
   document.querySelectorAll('.tab-btn').forEach(btn=>{
     if(btn.disabled) return;
@@ -4812,6 +4958,7 @@ function init(){
   state.date = datePicker.value;
 
   datePicker.addEventListener('change', ()=>{ state.date = datePicker.value; loadSchedule(state.date); });
+  document.getElementById('loadAllLinesBtn').addEventListener('click', loadAllLiveLines);
   document.getElementById('refreshBtn').addEventListener('click', async ()=>{
     const btn = document.getElementById('refreshBtn');
     btn.textContent = 'Refreshing…';
