@@ -840,6 +840,28 @@
       <div id="aiAnalysisResult"></div>
     </div>
 
+    <!-- Proposed Adjustments (shown after analysis) -->
+    <div class="panel" id="aiAdjPanel" style="display:none;">
+      <div class="panel-title">Proposed Model Adjustments <small id="aiAdjCount"></small></div>
+      <div class="panel-desc">Based on your graded pick history, the AI is proposing these specific changes. Each adjustment is backed by data. Approve to apply live — the model changes immediately.</div>
+      <div id="aiAdjList"></div>
+    </div>
+
+    <!-- Active Adjustments -->
+    <div class="panel" id="aiActiveAdjPanel" style="display:none;">
+      <div class="panel-title">Active Model Adjustments</div>
+      <div class="panel-desc">These changes are currently applied to the model. The model runs differently from defaults based on your graded history.</div>
+      <div id="aiActiveAdjList"></div>
+      <button class="ghost" id="aiResetAllAdj" style="width:100%;margin-top:8px;color:var(--cold);">Reset All Adjustments to Defaults</button>
+    </div>
+
+    <!-- Calibration Report -->
+    <div class="panel">
+      <div class="panel-title">Model Calibration</div>
+      <div class="panel-desc">When the model says 15%, does it actually hit 15%? This is the professional quality check — separate from ROI variance. A well-calibrated model's bars match across all probability ranges.</div>
+      <div id="aiCalibrationResult"></div>
+    </div>
+
     <!-- Cloud Sync + Diagnostics -->
     <div class="panel">
       <div class="panel-title">Cloud Sync <small>auto-grades picks nightly at 2 AM PT</small></div>
@@ -1054,8 +1076,11 @@ let state = {
   hrScanByName: {},
   ksScanByName: {},
   outsScanByName: {},
-  pitcherStatcastCache: {},  // personId → {cswPct, whiffPct, name}
-  umpireCache: {},            // gamePk → {name, kTendency}
+  pitcherStatcastCache: {},
+  umpireCache: {},
+  modelAdjustments: {},
+  bullpenFatigueCache: {},
+  bullpenFatigueLoaded: false,
   teamOffenseCache: {},
   ouScanResults: [],
   streakPicks: [],
@@ -2185,6 +2210,7 @@ function renderLeaderboard(results){
     if(edgeGate && (edge===null||edge<0.03)) return;
     shown++;
     const { score, level, levelColor } = calcConvictionSignals(r.name, r.prob, oddsRow);
+    const shopBadge = bestBookBadgeHTML(PROP_MARKET.HR, r.name);
     const row = document.createElement('div');
     row.className = 'leaderboard-row'+(hasLines&&edge!==null&&edge<0?' lb-dimmed':'');
     row.innerHTML = `<div class="rank">${i+1}</div>
@@ -2192,6 +2218,7 @@ function renderLeaderboard(results){
         <div class="lb-name">${r.name} <span style="color:var(--chalk-dim); font-weight:400;">(${r.team})</span></div>
         <div class="lb-meta">vs ${r.opp}</div>
         ${score >= 2 ? `<div style="font-family:var(--mono);font-size:10px;color:${levelColor};margin-top:2px;">● ${level} · ${score} signals</div>` : ''}
+        ${shopBadge}
       </div>
       <div class="lb-right">
         <div class="lb-score" style="color:${r.tag.color};">${pct(r.prob)}</div>
@@ -2230,8 +2257,8 @@ function populateAuxGameSelects(){
 
 function getProbablePitcherOptions(g){
   const opts = [];
-  if(g.teams.away.probablePitcher) opts.push({ id:g.teams.away.probablePitcher.id, name:g.teams.away.probablePitcher.fullName, team:abbrForTeam(g.teams.away.team), oppTeamId:g.teams.home.team.id, oppAbbr:abbrForTeam(g.teams.home.team) });
-  if(g.teams.home.probablePitcher) opts.push({ id:g.teams.home.probablePitcher.id, name:g.teams.home.probablePitcher.fullName, team:abbrForTeam(g.teams.home.team), oppTeamId:g.teams.away.team.id, oppAbbr:abbrForTeam(g.teams.away.team) });
+  if(g.teams.away.probablePitcher) opts.push({ id:g.teams.away.probablePitcher.id, name:g.teams.away.probablePitcher.fullName, team:abbrForTeam(g.teams.away.team), teamId:g.teams.away.team.id, oppTeamId:g.teams.home.team.id, oppAbbr:abbrForTeam(g.teams.home.team) });
+  if(g.teams.home.probablePitcher) opts.push({ id:g.teams.home.probablePitcher.id, name:g.teams.home.probablePitcher.fullName, team:abbrForTeam(g.teams.home.team), teamId:g.teams.home.team.id, oppTeamId:g.teams.away.team.id, oppAbbr:abbrForTeam(g.teams.away.team) });
   return opts;
 }
 function populatePitcherSelect(selectEl, g){
@@ -2424,12 +2451,16 @@ function renderKsLeaderboard(results){
     const edge = oddsRow && overProb !== null ? overProb - oddsRow.odds_probability : null;
     if(edgeGate && (edge===null||edge<0.03)) return;
     shown++;
+    const ksShopBadge = bestBookBadgeHTML(PROP_MARKET.K, r.name);
+    const cswNote = r.cswPct ? ` · CSW ${r.cswPct.toFixed(1)}%` : '';
+    const umpireNote = r.umpire ? ` · ${r.umpire.name.split(' ').pop()} ${r.umpire.kTendency>=0?'+':''}${r.umpire.kTendency.toFixed(1)}K` : '';
     const row = document.createElement('div');
     row.className = 'leaderboard-row'+(hasLines&&edge!==null&&edge<0?' lb-dimmed':'');
     row.innerHTML = `<div class="rank">${i+1}</div>
       <div class="lb-main">
         <div class="lb-name">${r.name} <span style="color:var(--chalk-dim); font-weight:400;">(${r.team})</span></div>
-        <div class="lb-meta">vs ${r.opp}${oddsRow?' · line '+oddsRow.line:''}</div>
+        <div class="lb-meta">vs ${r.opp}${oddsRow?' · line '+oddsRow.line:''}${cswNote}${umpireNote}</div>
+        ${ksShopBadge}
       </div>
       <div class="lb-right">
         <div class="lb-score">${r.lambda.toFixed(1)} K</div>
@@ -2536,8 +2567,12 @@ async function runOutsAutoScan(){
       if(!pitStats || pitStats.blendedIPperStart == null) return;
       const oppRunsPerGame = oppOffense != null ? oppOffense : LEAGUE_AVG_RUNS_PER_GAME;
       const offenseFactor = Math.max(0.85, Math.min(1.12, 1 - (oppRunsPerGame - LEAGUE_AVG_RUNS_PER_GAME) * 0.02));
-      const projOuts = pitStats.blendedIPperStart * 3 * offenseFactor;
-      allResults.push({ name:o.name, team:o.team, opp:o.oppAbbr, projOuts, offenseFactor, gamePk:g.gamePk, pitcherId:o.id });
+      const baseOuts = pitStats.blendedIPperStart * 3 * offenseFactor;
+      // Bullpen fatigue: team's own pen fatigued → manager rides starter deeper
+      const bpAdj = bullpenOutsAdj(o.teamId);
+      const projOuts = Math.max(3, baseOuts + bpAdj);
+      const bpLevel = getBullpenFatigue(o.teamId).level;
+      allResults.push({ name:o.name, team:o.team, opp:o.oppAbbr, projOuts, offenseFactor, gamePk:g.gamePk, pitcherId:o.id, bpLevel });
     }));
   }, 4, (done,total)=>{ progressEl.textContent = `Scanning ${done} / ${total} games…`; });
 
@@ -3092,8 +3127,9 @@ async function runOutsAutoScanSilent(){
       if(!pitStats || pitStats.blendedIPperStart == null) return;
       const oppRPG = oppOffense != null ? oppOffense : LEAGUE_AVG_RUNS_PER_GAME;
       const offenseFactor = Math.max(0.85, Math.min(1.12, 1 - (oppRPG - LEAGUE_AVG_RUNS_PER_GAME) * 0.02));
-      const projOuts = pitStats.blendedIPperStart * 3 * offenseFactor;
-      allResults.push({ name:o.name, team:o.team, opp:o.oppAbbr, projOuts, offenseFactor, gamePk:g.gamePk });
+      const bpAdj = bullpenOutsAdj(o.teamId);
+      const projOuts = Math.max(3, pitStats.blendedIPperStart * 3 * offenseFactor + bpAdj);
+      allResults.push({ name:o.name, team:o.team, opp:o.oppAbbr, projOuts, offenseFactor, gamePk:g.gamePk, bpLevel:getBullpenFatigue(o.teamId).level });
     }));
   }, 4);
   state.outsScanByName = {};
@@ -3314,8 +3350,12 @@ function captureLabProps(marketSlug, propType, rows){
     if(keySet.has(key)) return;
     keySet.add(key);
 
+    // Skip disabled prop types
+    if(isPropTypeDisabled(propType)) return;
+
     const tier = edge >= 0.07 ? 'strong' : edge >= 0.04 ? 'medium' : edge >= 0.01 ? 'small' : 'none';
-    const recommended = edge >= EDGE_TAKE_THRESHOLD;
+    // Use AI-adjusted edge threshold if available, else global default
+    const recommended = edge >= getEdgeThreshold(propType);
     const gamePk = findGamePkFromTeams(row.away_team, row.home_team);
 
     // PRIME Rating + Decision State at capture time
@@ -4650,7 +4690,15 @@ async function projectGameOUTotal(g){
   // Projected runs for each team
   const awayProj = awayRPG * (LEAGUE_AVG_ERA / homeERA) * parkFactor;
   const homeProj = homeRPG * (LEAGUE_AVG_ERA / awayERA) * parkFactor;
-  const totalProj = awayProj + homeProj;
+
+  // Bullpen fatigue run adjustment: fatigued bullpen → more late-inning runs allowed
+  const awayBPAdj = bullpenRunAdj(away.id);
+  const homeBPAdj = bullpenRunAdj(home.id);
+  // Fatigued AWAY bullpen means HOME team scores more runs (from away pen)
+  // Fatigued HOME bullpen means AWAY team scores more runs (from home pen)
+  const totalProj = (awayProj + homeBPAdj) + (homeProj + awayBPAdj);
+  const awayBPLevel = getBullpenFatigue(away.id).level;
+  const homeBPLevel = getBullpenFatigue(home.id).level;
 
   // Edge vs live line
   const ouRows = state.liveOdds[TOTAL_MARKET] || [];
@@ -4670,6 +4718,7 @@ async function projectGameOUTotal(g){
     gamePk: g.gamePk, awayAbbr, homeAbbr, awayPitcherName, homePitcherName,
     awayProj, homeProj, totalProj, line, overProb, edge,
     oddsRow: gameOURow || null,
+    awayBPLevel, homeBPLevel,
     tag: totalProj > 9 ? { color:'var(--clay-2)', label:'High-scoring' } :
          totalProj > 8 ? { color:'var(--mustard)', label:'Average' } :
                           { color:'#5e78a4', label:"Pitcher's game" }
@@ -4725,6 +4774,8 @@ function renderOULeaderboard(results){
           <span class="ou-stat">${r.homeAbbr} proj ${r.homeProj.toFixed(1)} R</span>
           ${r.line ? `<span class="ou-stat">Line ${r.line}</span>` : ''}
           ${edge !== null ? `<span class="ou-stat" style="color:${Math.abs(edge)>=0.04?'#7CC68A':'var(--chalk-dim)'};">${edge>=0?'+':''}${(edge*100).toFixed(1)}pt edge</span>` : ''}
+          ${r.awayBPLevel&&r.awayBPLevel!=='Normal' ? `<span class="ou-stat" style="color:${r.awayBPLevel==='Fatigued'?'var(--clay-2)':'#5e78a4'};">${r.awayAbbr} pen ${r.awayBPLevel}</span>` : ''}
+          ${r.homeBPLevel&&r.homeBPLevel!=='Normal' ? `<span class="ou-stat" style="color:${r.homeBPLevel==='Fatigued'?'var(--clay-2)':'#5e78a4'};">${r.homeAbbr} pen ${r.homeBPLevel}</span>` : ''}
         </div>
       </div>
       <div class="ou-right">
@@ -5024,40 +5075,60 @@ async function runAIAnalysis(){
   const statusEl = document.getElementById('aiStatus');
   const tsEl = document.getElementById('aiTimestamp');
   btn.disabled = true; btn.textContent = 'Analyzing…';
-  statusEl.textContent = 'Reading graded pick history and calling Claude…';
+  statusEl.textContent = 'Step 1/2: Reading graded pick history…';
   resultPanel.style.display = 'block';
   resultEl.innerHTML = '<div class="empty-state">Running…</div>';
 
+  let analysisData = null;
   try{
     const res = await fetch(`${WORKER_BASE}/agent/analyze`);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    analysisData = await res.json();
 
-    if(data.error){
-      resultEl.innerHTML = `<div class="no-lines-notice">⚠️ ${data.error}</div>`;
+    if(analysisData.error){
+      resultEl.innerHTML = `<div class="no-lines-notice">⚠️ ${analysisData.error}</div>`;
     } else {
-      const text = (data.analysis||'')
+      const text = (analysisData.analysis||'')
         .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-        .replace(/\n/g,'<br>')
-        .replace(/\*\*(.*?)\*\*/g,'<b>$1</b>')
-        .replace(/^(\d+\.\s)/gm,'<br><b>$1</b>');
-
+        .replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<b>$1</b>');
       resultEl.innerHTML = `
-        ${data.meta ? `<div class="stat-grid" style="margin-bottom:14px;">
-          <div class="stat-box"><div class="k">Graded Picks</div><div class="v">${data.meta.graded}</div></div>
-          <div class="stat-box"><div class="k">Recommended</div><div class="v">${data.meta.recommended}</div></div>
-          <div class="stat-box"><div class="k">ROI</div><div class="v" style="color:${parseFloat(data.meta.roi||0)>=0?'#7CC68A':'var(--cold)'};">${data.meta.roi}%</div></div>
-          <div class="stat-box"><div class="k">Units P&L</div><div class="v" style="color:${parseFloat(data.meta.units||0)>=0?'#7CC68A':'var(--cold)'};">${parseFloat(data.meta.units||0)>=0?'+':''}${data.meta.units}u</div></div>
+        ${analysisData.meta ? `<div class="stat-grid" style="margin-bottom:14px;">
+          <div class="stat-box"><div class="k">Graded</div><div class="v">${analysisData.meta.graded}</div></div>
+          <div class="stat-box"><div class="k">Rec Bets</div><div class="v">${analysisData.meta.recommended}</div></div>
+          <div class="stat-box"><div class="k">ROI</div><div class="v" style="color:${parseFloat(analysisData.meta.roi||0)>=0?'#7CC68A':'var(--cold)'};">${analysisData.meta.roi}%</div></div>
+          <div class="stat-box"><div class="k">Units P&L</div><div class="v" style="color:${parseFloat(analysisData.meta.units||0)>=0?'#7CC68A':'var(--cold)'};">${parseFloat(analysisData.meta.units||0)>=0?'+':''}${analysisData.meta.units}u</div></div>
         </div>` : ''}
         <div style="font-family:var(--body);font-size:13px;line-height:1.75;color:var(--chalk);">${text}</div>
       `;
       if(tsEl) tsEl.textContent = new Date().toLocaleTimeString();
     }
-    statusEl.textContent = '';
+    statusEl.textContent = 'Step 2/2: Generating model adjustment suggestions…';
   }catch(e){
-    resultEl.innerHTML = `<div class="no-lines-notice">Analysis failed: ${e.message}. Check that ANTHROPIC_API_KEY is added to your Worker secrets.</div>`;
+    resultEl.innerHTML = `<div class="no-lines-notice">Analysis failed: ${e.message}. Check ANTHROPIC_API_KEY in Worker secrets.</div>`;
     statusEl.textContent = '';
+    btn.disabled = false; btn.textContent = 'Run AI Analysis';
+    return;
   }
+
+  // Step 2: Get structured model adjustments
+  try{
+    const adjRes = await fetch(`${WORKER_BASE}/agent/analyze?mode=adjustments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        byType: analysisData.byType || {},
+        byTier: analysisData.byTier || {},
+        calibration: analysisData.calibration || {},
+        graded: analysisData.gradedCount || 0
+      })
+    });
+    if(adjRes.ok){
+      const adjData = await adjRes.json();
+      renderProposedAdjustments(adjData.adjustments || []);
+    }
+  }catch(e){ logDebug(`Adjustment suggestions failed: ${e.message}`, false); }
+
+  statusEl.textContent = '';
   btn.disabled = false; btn.textContent = 'Run AI Analysis';
 }
 
@@ -5094,6 +5165,10 @@ async function loadAllLiveLines(){
   // Load pitcher CSW%/whiff rate from Savant (PRIME upgrade)
   statusEl.textContent = `Lines loaded · Loading pitcher CSW% data…`;
   await loadPitcherStatcast();
+
+  // Load bullpen fatigue from last 3 games per team
+  statusEl.textContent = `Lines loaded · Loading bullpen fatigue data…`;
+  await loadBullpenFatigue();
 
   await Promise.all([
     runAutoScanSilent(),
@@ -5366,77 +5441,168 @@ function convictionBadgeHTML(playerName, modelProb, oddsRow){
   `;
 }
 
-function wireTabs(){
-  const signals = [];
-  let score = 0;
-  const scan = state.hrScanByName[playerName.toLowerCase()];
+/* =========================================================================
+   MODEL ADJUSTMENTS — AI-proposed, user-approved live model changes
+   ========================================================================= */
+const MODEL_ADJ_KEY = 'mlb_model_adjustments';
 
-  // ── Statcast barrel rate — strongest single predictor ─────────────────────
-  const scEntry = Object.entries(state.statcastBatters||{}).find(([,s])=>
-    s.name && (s.name.toLowerCase()===playerName.toLowerCase() ||
-               playerName.toLowerCase().includes(s.name.toLowerCase().split(' ').pop()))
-  );
-  if(scEntry){
-    const sc = scEntry[1];
-    if(sc.barrelRate != null){
-      const rel = sc.barrelRate / LEAGUE_AVG_BARREL_RATE;
-      if(rel >= 1.8){ signals.push('🔴 Elite barrel rate'); score += 3; }
-      else if(rel >= 1.3){ signals.push('🟠 High barrel rate'); score += 2; }
-      else if(rel >= 1.1){ signals.push('🟡 Above-avg barrel rate'); score += 1; }
-      else if(rel < 0.7){ signals.push('⚪ Low barrel rate'); score -= 1; }
-    }
-    if(sc.hardHitPct != null && sc.hardHitPct > LEAGUE_AVG_HARD_HIT * 1.2){
-      signals.push('💥 High hard-hit rate'); score += 1;
-    }
-  } else if(scan?.statcastBatAdj != null){
-    // Use the stored adjustment from scan as a proxy when we don't have raw Statcast
-    if(scan.statcastBatAdj >= 1.25){ signals.push('🟠 Statcast quality: well above avg'); score += 2; }
-    else if(scan.statcastBatAdj >= 1.10){ signals.push('🟡 Statcast quality: above avg'); score += 1; }
-    else if(scan.statcastBatAdj < 0.85){ signals.push('⚪ Statcast quality: below avg'); score -= 1; }
+function loadModelAdjustments(){
+  try{ return JSON.parse(localStorage.getItem(MODEL_ADJ_KEY)||'{}'); }catch(e){ return {}; }
+}
+function saveModelAdjustments(adj){
+  localStorage.setItem(MODEL_ADJ_KEY, JSON.stringify(adj));
+  state.modelAdjustments = adj;
+}
+
+function initModelAdjustments(){
+  state.modelAdjustments = loadModelAdjustments();
+  renderActiveAdjustments();
+}
+
+// Get the effective edge threshold for a prop type (default or AI-adjusted)
+function getEdgeThreshold(propType){
+  return state.modelAdjustments?.edge_threshold?.[propType] ?? EDGE_TAKE_THRESHOLD;
+}
+
+// Get the PRIME Rating cap for a prop type (default 100 or AI-adjusted)
+function getPrimeCap(propType){
+  return state.modelAdjustments?.prime_cap?.[propType] ?? 100;
+}
+
+// Is a prop type temporarily disabled by AI adjustment?
+function isPropTypeDisabled(propType){
+  return state.modelAdjustments?.prop_disabled?.[propType] === true;
+}
+
+function applyAdjustment(adj){
+  const current = loadModelAdjustments();
+
+  if(adj.type === 'edge_threshold' && adj.propType){
+    if(!current.edge_threshold) current.edge_threshold = {};
+    current.edge_threshold[adj.propType] = adj.proposedValue;
+  } else if(adj.type === 'prime_cap' && adj.propType){
+    if(!current.prime_cap) current.prime_cap = {};
+    current.prime_cap[adj.propType] = adj.proposedValue;
+  } else if(adj.type === 'prop_disabled' && adj.propType){
+    if(!current.prop_disabled) current.prop_disabled = {};
+    current.prop_disabled[adj.propType] = adj.proposedValue;
+  } else if(adj.type === 'barrel_weight'){
+    current.barrel_weight = adj.proposedValue;
+  } else if(adj.type === 'csw_weight'){
+    current.csw_weight = adj.proposedValue;
   }
 
-  // ── Pitcher fly ball tendency ──────────────────────────────────────────────
-  if(scan?.fbAdj != null){
-    if(scan.fbAdj >= 1.15){ signals.push('🎯 Fly-ball pitcher (HR-prone)'); score += 2; }
-    else if(scan.fbAdj >= 1.07){ signals.push('↗️ Slightly fly-ball pitcher'); score += 1; }
-    else if(scan.fbAdj <= 0.85){ signals.push('⬇️ Ground-ball pitcher (suppresses HRs)'); score -= 1; }
+  // Record full audit trail
+  if(!current._history) current._history = [];
+  current._history.push({ ...adj, appliedAt: new Date().toISOString() });
+
+  saveModelAdjustments(current);
+  renderActiveAdjustments();
+  logDebug(`Model adjustment applied: ${adj.label}`, true);
+}
+
+function resetAllAdjustments(){
+  if(!confirm('Reset all AI adjustments? The model returns to defaults.')) return;
+  saveModelAdjustments({});
+  renderActiveAdjustments();
+  document.getElementById('aiActiveAdjPanel').style.display='none';
+}
+
+function renderProposedAdjustments(adjustments){
+  const panel = document.getElementById('aiAdjPanel');
+  const list = document.getElementById('aiAdjList');
+  const countEl = document.getElementById('aiAdjCount');
+  if(!adjustments?.length){ panel.style.display='none'; return; }
+
+  panel.style.display='block';
+  countEl.textContent = `${adjustments.length} proposed`;
+
+  const UNIT_LABELS = {
+    decimal_edge: v => `${(v*100).toFixed(0)}pt minimum`,
+    prime_score: v => `PRIME cap ${v}`,
+    multiplier: v => `${v}× weight`,
+    boolean: v => v ? 'Disabled' : 'Enabled'
+  };
+
+  list.innerHTML = adjustments.map(adj=>{
+    const currentFmt = UNIT_LABELS[adj.unit]?.(adj.currentValue) || adj.currentValue;
+    const proposedFmt = UNIT_LABELS[adj.unit]?.(adj.proposedValue) || adj.proposedValue;
+    const confColor = adj.confidence==='high'?'#7CC68A':adj.confidence==='medium'?'var(--mustard)':'var(--chalk-dim)';
+    return `
+      <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+          <div>
+            <div style="font-weight:700;font-size:13px;">${adj.label}</div>
+            <div style="font-family:var(--mono);font-size:10px;color:${confColor};margin-top:2px;">${adj.confidence.toUpperCase()} confidence · ${adj.propType||'Global'}</div>
+          </div>
+          <div style="text-align:right;font-family:var(--mono);font-size:11px;flex-shrink:0;">
+            <div style="color:var(--chalk-dim);">${currentFmt}</div>
+            <div style="color:var(--mustard);">→ ${proposedFmt}</div>
+          </div>
+        </div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--chalk-dim);margin-bottom:8px;line-height:1.5;">${adj.description}</div>
+        <div style="font-family:var(--mono);font-size:10px;color:#5e78a4;margin-bottom:8px;">${adj.evidence}</div>
+        <div style="display:flex;gap:8px;">
+          <button class="primary adjApproveBtn" data-adj='${JSON.stringify(adj).replace(/'/g,"&#39;")}' style="flex:1;padding:8px;font-size:12px;">✓ Apply This Change</button>
+          <button class="ghost adjRejectBtn" data-id="${adj.id}" style="padding:8px;font-size:12px;">Reject</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  list.querySelectorAll('.adjApproveBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const adj = JSON.parse(btn.dataset.adj.replace(/&#39;/g,"'"));
+      applyAdjustment(adj);
+      btn.closest('div[style]').style.opacity='0.5';
+      btn.textContent='✓ Applied';
+      btn.disabled=true;
+    });
+  });
+  list.querySelectorAll('.adjRejectBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ btn.closest('div[style]').remove(); });
+  });
+}
+
+function renderActiveAdjustments(){
+  const panel = document.getElementById('aiActiveAdjPanel');
+  const list = document.getElementById('aiActiveAdjList');
+  if(!panel||!list) return;
+
+  const adj = loadModelAdjustments();
+  const items = [];
+
+  if(adj.edge_threshold){
+    Object.entries(adj.edge_threshold).forEach(([type,val])=>{
+      items.push({ label:`${type} edge threshold`, value:`${(val*100).toFixed(0)}pt minimum`, key:`edge_threshold.${type}` });
+    });
   }
-
-  // ── Platoon advantage ──────────────────────────────────────────────────────
-  if(scan?.usedPlatoon){ signals.push('🎯 Favorable platoon matchup (40+ PA sample)'); score += 2; }
-
-  // ── Park factor ────────────────────────────────────────────────────────────
-  const pf = scan?.parkFactor;
-  if(pf != null){
-    if(pf >= 1.10){ signals.push('🏟️ Hitter-friendly park'); score += 1; }
-    else if(pf <= 0.92){ signals.push('🛡️ Pitcher-friendly park'); score -= 1; }
+  if(adj.prime_cap){
+    Object.entries(adj.prime_cap).forEach(([type,val])=>{
+      items.push({ label:`${type} PRIME cap`, value:`Max ${val}`, key:`prime_cap.${type}` });
+    });
   }
-
-  // ── Edge vs book — value confirmation ─────────────────────────────────────
-  if(oddsRow && modelProb != null){
-    const edge = modelProb - oddsRow.odds_probability;
-    if(edge >= 0.07){ signals.push('💰 Strong edge vs book (+7pt)'); score += 3; }
-    else if(edge >= 0.04){ signals.push('✅ Positive edge vs book (+4pt)'); score += 2; }
-    else if(edge >= 0.01){ signals.push('📊 Slight edge vs book'); score += 1; }
-    else { signals.push('❌ Book has the edge'); score -= 2; }
+  if(adj.prop_disabled){
+    Object.entries(adj.prop_disabled).filter(([,v])=>v).forEach(([type])=>{
+      items.push({ label:`${type} props`, value:'Disabled', key:`prop_disabled.${type}` });
+    });
   }
+  if(adj.barrel_weight) items.push({ label:'Barrel rate weight', value:`${adj.barrel_weight}×`, key:'barrel_weight' });
+  if(adj.csw_weight) items.push({ label:'CSW% weight', value:`${adj.csw_weight}×`, key:'csw_weight' });
 
-  // ── Model probability tier ─────────────────────────────────────────────────
-  if(modelProb != null){
-    if(modelProb >= 0.20){ signals.push('🔥 Elite HR probability (20%+)'); score += 2; }
-    else if(modelProb >= 0.15){ signals.push('⚡ Strong HR probability (15%+)'); score += 1; }
-  }
-
-  const level = score >= 8 ? 'HIGH CONVICTION' : score >= 5 ? 'Medium Conviction' : score >= 3 ? 'Building Case' : 'Insufficient Data';
-  const levelColor = score >= 8 ? '#7CC68A' : score >= 5 ? 'var(--mustard)' : score >= 3 ? 'var(--chalk-dim)' : 'var(--cold)';
-
-  return { score, signals, level, levelColor };
+  if(!items.length){ panel.style.display='none'; return; }
+  panel.style.display='block';
+  list.innerHTML = items.map(item=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid var(--line);">
+      <div style="font-family:var(--mono);font-size:12px;">${item.label}: <b style="color:var(--mustard);">${item.value}</b></div>
+    </div>
+  `).join('');
 }
 
 /* =========================================================================
    DATE NAVIGATION — browse previous dates in Tracking and Props Lab
    ========================================================================= */
-let trackDateFilter = '';   // '' = all dates
+let trackDateFilter = '';
 let labDateFilter = '';
 
 function getPickDates(){
@@ -5472,59 +5638,31 @@ async function runHealthCheck(){
   const resultEl = document.getElementById('healthCheckResult');
   btn.disabled = true; btn.textContent = 'Checking…';
   resultEl.innerHTML = '<div class="empty-state">Testing Worker endpoints…</div>';
-
   const checks = [];
-
-  // 1. Worker reachable
   try{
     const r = await fetch(`${WORKER_BASE}/health`, { signal: AbortSignal.timeout(5000) });
     const data = r.ok ? await r.json() : null;
     if(data && data.version === 'v4'){
       checks.push({ label:'Worker v4 deployed', ok:true, detail:`Version: ${data.version}` });
-      checks.push({ label:'KV namespace bound', ok:!!data.kv, detail: data.kv ? 'MLB_PICKS connected' : '❌ KV not bound — follow setup guide Step 2' });
-      checks.push({ label:'Anthropic API key set', ok:!!data.anthropic, detail: data.anthropic ? 'ANTHROPIC_API_KEY found' : '❌ Add ANTHROPIC_API_KEY secret — setup guide Step 3' });
-      checks.push({ label:'Cron trigger', ok:data.cron||false, detail: data.cron ? `Scheduled: ${data.cron}` : '⚠️ Add cron trigger 0 9 * * * in Worker Triggers' });
+      checks.push({ label:'KV namespace bound', ok:!!data.kv, detail: data.kv ? 'MLB_PICKS connected' : '❌ KV not bound — setup guide Step 2' });
+      checks.push({ label:'Anthropic API key set', ok:!!data.anthropic, detail: data.anthropic ? 'ANTHROPIC_API_KEY found' : '❌ Add secret — setup guide Step 3' });
+      checks.push({ label:'Cron trigger', ok:!!data.cron, detail: data.cron ? `Scheduled: ${data.cron}` : '⚠️ Add cron trigger 0 9 * * *' });
     } else if(r.ok){
-      checks.push({ label:'Worker reachable', ok:true, detail:'Old Worker code detected — needs v4 update' });
-      checks.push({ label:'Worker v4 not deployed', ok:false, detail:'Paste mlb-worker-v4-agent.js into the Worker editor and deploy' });
-    } else {
-      throw new Error(`HTTP ${r.status}`);
-    }
-  } catch(e){
-    checks.push({ label:'Worker reachable', ok:false, detail:`Error: ${e.message} — check Worker is deployed` });
-  }
-
-  // 2. KV picks sync test
+      checks.push({ label:'Worker reachable', ok:true, detail:'Old Worker — needs v4 update' });
+      checks.push({ label:'Worker v4 not deployed', ok:false, detail:'Paste mlb-worker-v4-agent.js and deploy' });
+    } else { throw new Error(`HTTP ${r.status}`); }
+  }catch(e){ checks.push({ label:'Worker reachable', ok:false, detail:`Error: ${e.message}` }); }
   try{
     const r = await fetch(`${WORKER_BASE}/picks/stats`, { signal: AbortSignal.timeout(5000) });
-    if(r.ok){
-      const stats = await r.json();
-      checks.push({ label:'KV picks sync', ok:true, detail:`${stats.totalGraded||0} picks graded in cloud, last update: ${stats.lastUpdated ? new Date(stats.lastUpdated).toLocaleDateString() : 'never (cron hasn\'t run yet)'}` });
-    } else { throw new Error(`HTTP ${r.status}`); }
-  } catch(e){
-    checks.push({ label:'KV picks sync', ok:false, detail:`Cannot read KV: ${e.message}` });
-  }
-
-  // 3. Local data check
+    if(r.ok){ const s=await r.json(); checks.push({ label:'KV picks sync', ok:true, detail:`${s.totalGraded||0} graded in cloud, last: ${s.lastUpdated?new Date(s.lastUpdated).toLocaleDateString():'never'}` }); }
+    else throw new Error(`HTTP ${r.status}`);
+  }catch(e){ checks.push({ label:'KV picks sync', ok:false, detail:`Cannot read KV: ${e.message}` }); }
   const localProps = loadLabProps();
-  const withGamePk = localProps.filter(p=>p.gamePk);
-  const withoutGamePk = localProps.filter(p=>!p.gamePk && p.propType==='HR');
-  checks.push({
-    label:'Local Props Lab data',
-    ok:localProps.length > 0,
-    detail:`${localProps.length} total props · ${withGamePk.length} have gamePk (auto-gradeable) · ${withoutGamePk.length} HR props missing gamePk`
-  });
-
-  resultEl.innerHTML = checks.map(c=>`
-    <div style="display:flex;align-items:flex-start;gap:10px;padding:8px;border-bottom:1px solid var(--line);">
-      <div style="font-size:18px;flex-shrink:0;">${c.ok?'✅':'❌'}</div>
-      <div>
-        <div style="font-weight:700;font-size:13px;">${c.label}</div>
-        <div style="font-family:var(--mono);font-size:11px;color:var(--chalk-dim);margin-top:2px;">${c.detail}</div>
-      </div>
-    </div>
-  `).join('');
-
+  checks.push({ label:'Local Props Lab', ok:localProps.length>0, detail:`${localProps.length} props · ${localProps.filter(p=>p.gamePk).length} auto-gradeable` });
+  resultEl.innerHTML = checks.map(c=>`<div style="display:flex;gap:10px;padding:8px;border-bottom:1px solid var(--line);">
+    <div style="font-size:18px;flex-shrink:0;">${c.ok?'✅':'❌'}</div>
+    <div><div style="font-weight:700;font-size:13px;">${c.label}</div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--chalk-dim);margin-top:2px;">${c.detail}</div></div></div>`).join('');
   btn.disabled = false; btn.textContent = 'Run Deployment Check';
 }
 
@@ -5535,22 +5673,198 @@ function renderLocalDiagnostic(){
   const el = document.getElementById('localDiagnostic');
   if(!el) return;
   const props = loadLabProps();
-  if(!props.length){
-    el.innerHTML = '<div class="empty-state">No props in local storage. Tap "Load All Lines" on the main header to start capturing.</div>';
-    return;
-  }
+  if(!props.length){ el.innerHTML='<div class="empty-state">No props in local storage yet. Tap "Load All Lines" to start capturing.</div>'; return; }
   const byDate = {};
-  props.forEach(p=>{ if(!byDate[p.date]) byDate[p.date]={total:0,pending:0,win:0,loss:0,noGamePk:0}; const d=byDate[p.date]; d.total++; d[p.status]=(d[p.status]||0)+1; if(p.status==='pending') d.pending++; if(!p.gamePk) d.noGamePk++; });
+  props.forEach(p=>{ if(!byDate[p.date]) byDate[p.date]={total:0,pending:0,win:0,loss:0,noGamePk:0};
+    const d=byDate[p.date]; d.total++; d[p.status]=(d[p.status]||0)+1;
+    if(p.status==='pending') d.pending++; if(!p.gamePk) d.noGamePk++; });
   const dates = Object.keys(byDate).sort().reverse();
   el.innerHTML = `<table class="roi-table">
-    <tr><th>Date</th><th>Props</th><th>Pending</th><th>W-L</th><th>gamePk ⚠️</th></tr>
-    ${dates.map(d=>{
-      const s=byDate[d];
-      const warn = s.noGamePk > 0 ? `<span style="color:var(--mustard);">${s.noGamePk} missing</span>` : '<span style="color:#7CC68A;">all good</span>';
-      return `<tr><td>${d=== state.date?'<b>Today</b>':d}</td><td>${s.total}</td><td>${s.pending||0}</td><td>${s.win||0}W-${s.loss||0}L</td><td>${warn}</td></tr>`;
+    <tr><th>Date</th><th>Props</th><th>Pending</th><th>W-L</th><th>gamePk</th></tr>
+    ${dates.map(d=>{ const s=byDate[d];
+      return `<tr><td>${d===state.date?'<b>Today</b>':d}</td><td>${s.total}</td><td>${s.pending||0}</td><td>${s.win||0}W-${s.loss||0}L</td><td>${s.noGamePk>0?`<span style="color:var(--mustard);">${s.noGamePk} missing</span>`:'<span style="color:#7CC68A;">✓</span>'}</td></tr>`;
     }).join('')}
-  </table>
-  <div class="reliability-detail" style="margin-top:8px;">⚠️ Props missing gamePk cannot be auto-graded by the cron. They happened because lines were loaded before the schedule. Going forward, tap "Load All Lines" after the schedule loads.</div>`;
+  </table>`;
+}
+
+/* =========================================================================
+   BULLPEN FATIGUE INDEX (FEAT-004)
+   Fetch last 3 games of relief usage per team, produce Fresh/Normal/Fatigued.
+   Affects: Pitching Outs projection (+0.5 if fatigued) · O/U totals (±0.3 runs)
+   ========================================================================= */
+function ipToOuts(ip){
+  const parts = String(ip).split('.');
+  return parseInt(parts[0]||0)*3 + parseInt(parts[1]||0);
+}
+
+async function loadBullpenFatigue(){
+  if(state.bullpenFatigueLoaded) return;
+  const endDate = state.date;
+  const startD = new Date(endDate); startD.setDate(startD.getDate()-5);
+  const startDate = startD.toISOString().split('T')[0];
+
+  const schedData = await safeFetchJSON(
+    `${API}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}&hydrate=team`,
+    'bullpen fatigue schedule'
+  );
+  const recentGames = (schedData?.dates||[]).flatMap(d=>d.games||[])
+    .filter(g=>g.status?.abstractGameState==='Final')
+    .sort((a,b)=>new Date(b.gameDate)-new Date(a.gameDate));
+
+  // Map each team to their last 3 games
+  const teamGameMap = {};
+  recentGames.forEach(g=>{
+    const homeId = g.teams.home.team.id;
+    const awayId = g.teams.away.team.id;
+    if(!teamGameMap[homeId]) teamGameMap[homeId]=[];
+    if(!teamGameMap[awayId]) teamGameMap[awayId]=[];
+    if(teamGameMap[homeId].length<3) teamGameMap[homeId].push({pk:g.gamePk,side:'home'});
+    if(teamGameMap[awayId].length<3) teamGameMap[awayId].push({pk:g.gamePk,side:'away'});
+  });
+
+  // Batch-fetch unique box scores (cap at 18 to avoid overload)
+  const uniquePks = [...new Set(Object.values(teamGameMap).flat().map(x=>x.pk))].slice(0,18);
+  const boxScores = {};
+  await Promise.all(uniquePks.map(async pk=>{
+    const bs = await safeFetchJSON(`${API}/game/${pk}/boxscore`,`bp bs ${pk}`);
+    if(bs) boxScores[pk]=bs;
+  }));
+
+  // Calculate relief IP per team over last 3 games
+  Object.entries(teamGameMap).forEach(([teamId,games])=>{
+    let totalReliefOuts=0, gamesCount=0;
+    games.forEach(({pk,side})=>{
+      const bs=boxScores[pk]; if(!bs) return;
+      const players=bs.teams?.[side]?.players; if(!players) return;
+      Object.values(players).forEach(pl=>{
+        const ip=pl.stats?.pitching?.inningsPitched;
+        const gs=parseInt(pl.stats?.pitching?.gamesStarted||0);
+        if(ip!=null && gs===0) totalReliefOuts+=ipToOuts(ip);
+      });
+      gamesCount++;
+    });
+    if(!gamesCount){ state.bullpenFatigueCache[teamId]={score:50,level:'Normal',avgReliefIP:'4.5'}; return; }
+    const avgReliefIP = (totalReliefOuts/gamesCount)/3;
+    const LEAGUE_AVG_BP = 4.5;
+    // Score 0=fresh 100=exhausted
+    const score = Math.min(100, Math.max(0, Math.round((avgReliefIP/LEAGUE_AVG_BP)*50)));
+    const level = score>=65?'Fatigued':score<=32?'Fresh':'Normal';
+    state.bullpenFatigueCache[teamId]={score,level,avgReliefIP:avgReliefIP.toFixed(1)};
+  });
+
+  state.bullpenFatigueLoaded=true;
+  logDebug(`Bullpen fatigue loaded — ${Object.keys(state.bullpenFatigueCache).length} teams`,true);
+}
+
+function getBullpenFatigue(teamId){
+  return state.bullpenFatigueCache[teamId] || {score:50,level:'Normal',avgReliefIP:'4.5'};
+}
+
+// Outs adjustment: fatigued pen → manager rides starter deeper (+0.5 outs)
+// Fresh pen → manager pulls starter sooner (-0.3 outs)
+function bullpenOutsAdj(teamId){
+  const bf = getBullpenFatigue(teamId);
+  return bf.score>=65 ? +0.5 : bf.score<=32 ? -0.3 : 0;
+}
+
+// Run total adjustment: fatigued pen → more late-inning runs (±0.25 per team)
+function bullpenRunAdj(teamId){
+  const bf = getBullpenFatigue(teamId);
+  return bf.score>=65 ? +0.25 : bf.score<=32 ? -0.15 : 0;
+}
+
+/* =========================================================================
+   SHOP BOOKS — Multi-sportsbook line comparison (SYS-003)
+   Find best available odds for a player across all loaded sportsbooks.
+   ========================================================================= */
+function findBestOddsForPlayer(propType, playerName, selectionType='over'){
+  const rows = (state.liveOdds[propType]||[]).filter(r=>{
+    const n = r.player_name || r.selection;
+    return n && n.toLowerCase()===playerName.toLowerCase() && r.selection_type===selectionType;
+  });
+  if(rows.length<2) return null;
+  const mainLine = rows.find(r=>r.is_main_line);
+  if(!mainLine) return null;
+  const sameLineRows = rows.filter(r=>r.line==null || r.line===mainLine.line);
+  if(sameLineRows.length<2) return null;
+  const sorted = [...sameLineRows].sort((a,b)=>americanToDecimal(b.odds_american)-americanToDecimal(a.odds_american));
+  const best = sorted[0];
+  if(best.sportsbook===mainLine.sportsbook) return null;
+  const improvement = americanToDecimal(best.odds_american)-americanToDecimal(mainLine.odds_american);
+  if(improvement<0.03) return null;
+  return { best, mainLine, allBooks:sorted.slice(0,4), improvement };
+}
+
+function bestBookBadgeHTML(propType, playerName, selectionType='over'){
+  const r = findBestOddsForPlayer(propType, playerName, selectionType);
+  if(!r) return '';
+  return `<div style="font-family:var(--mono);font-size:10px;color:#7CC68A;margin-top:2px;">
+    🛒 SHOP BOOKS · Best: <b>${r.best.sportsbook}</b> ${r.best.odds_american>0?'+':''}${r.best.odds_american}
+    vs ${r.mainLine.sportsbook} ${r.mainLine.odds_american>0?'+':''}${r.mainLine.odds_american}
+  </div>`;
+}
+
+/* =========================================================================
+   CALIBRATION REPORT (SYS-005 Learning Engine)
+   Bucket graded picks by model probability, compare predicted vs actual.
+   A well-calibrated model hits 15% when it says 15%.
+   ========================================================================= */
+function calcCalibrationData(){
+  const props = loadLabProps();
+  const graded = props.filter(p=>(p.status==='win'||p.status==='loss') && p.modelProb!=null && p.modelProb>0);
+  const buckets=[
+    {min:0.06,max:0.10,label:'6–10%'},
+    {min:0.10,max:0.14,label:'10–14%'},
+    {min:0.14,max:0.18,label:'14–18%'},
+    {min:0.18,max:0.24,label:'18–24%'},
+    {min:0.24,max:1.0, label:'24%+'}
+  ];
+  return buckets.map(b=>{
+    const picks=graded.filter(p=>p.modelProb>=b.min && p.modelProb<b.max);
+    const wins=picks.filter(p=>p.status==='win').length;
+    const total=picks.length;
+    const avgPredicted=total>0?picks.reduce((s,p)=>s+p.modelProb,0)/total:null;
+    const actualRate=total>0?wins/total:null;
+    let calibration='Need 5+ picks', calColor='var(--chalk-dim)';
+    if(actualRate!==null && total>=5){
+      const diff=actualRate-avgPredicted;
+      if(Math.abs(diff)<0.04){ calibration='✓ Well calibrated'; calColor='#7CC68A'; }
+      else if(diff<-0.06){ calibration='⚠ Over-confident'; calColor='var(--clay-2)'; }
+      else if(diff<-0.04){ calibration='↓ Slightly over'; calColor='var(--mustard)'; }
+      else if(diff>0.04){ calibration='↑ Under-confident'; calColor='#5e78a4'; }
+      else { calibration='≈ Close'; calColor='var(--chalk-dim)'; }
+    }
+    return {...b,count:total,avgPredicted,actualRate,calibration,calColor};
+  });
+}
+
+function renderCalibrationReport(){
+  const el=document.getElementById('aiCalibrationResult');
+  if(!el) return;
+  const data=calcCalibrationData();
+  const total=data.reduce((s,b)=>s+b.count,0);
+  if(total<3){
+    el.innerHTML=`<div class="empty-state">Grade at least 5 picks to see calibration data. (${total} graded so far)</div>`;
+    return;
+  }
+  const wellCal=data.filter(b=>b.calibration.startsWith('✓') && b.count>=5).length;
+  const totalBuckets=data.filter(b=>b.count>=5).length;
+  el.innerHTML=`
+    <table class="roi-table" style="width:100%;">
+      <tr><th>Model Said</th><th>Picks</th><th>Avg Predicted</th><th>Actual Hit %</th><th>Signal</th></tr>
+      ${data.map(b=>`<tr>
+        <td style="font-family:var(--mono);">${b.label}</td>
+        <td>${b.count}</td>
+        <td>${b.avgPredicted!=null?pct(b.avgPredicted):'—'}</td>
+        <td style="font-weight:${b.count>=5?'700':'400'}">${b.actualRate!=null?pct(b.actualRate):'—'}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:${b.calColor};">${b.calibration}</td>
+      </tr>`).join('')}
+    </table>
+    <div class="reliability-detail" style="margin-top:8px;">
+      ${totalBuckets>0?`${wellCal}/${totalBuckets} buckets calibrated · `:''}${total} total graded picks.
+      ${total<50?' Build to 50+ for reliable calibration signal.':total<20?' Build to 20+ per bucket for confidence.':''}
+    </div>
+  `;
 }
 
 function wireTabs(){
@@ -5568,7 +5882,7 @@ function wireTabs(){
       if(btn.dataset.tab === 'lab') renderLab();
       if(btn.dataset.tab === 'paytab') renderPTCards();
       if(btn.dataset.tab === 'streak') renderStreakTab();
-      if(btn.dataset.tab === 'ai'){ loadKVStats(); renderLocalDiagnostic(); }
+      if(btn.dataset.tab === 'ai'){ loadKVStats(); renderLocalDiagnostic(); renderCalibrationReport(); }
     });
   });
 }
@@ -5703,10 +6017,12 @@ function init(){
   wireStreakFilters();
 
   initPayTab();
+  initModelAdjustments();
 
   // AI Analyst + KV sync
   document.getElementById('aiAnalyzeBtn').addEventListener('click', runAIAnalysis);
   document.getElementById('healthCheckBtn').addEventListener('click', runHealthCheck);
+  document.getElementById('aiResetAllAdj').addEventListener('click', resetAllAdjustments);
   document.getElementById('kvSyncNowBtn').addEventListener('click', syncFromKV);
   document.getElementById('kvPushNowBtn').addEventListener('click', async ()=>{
     const allProps = loadLabProps();
