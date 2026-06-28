@@ -890,6 +890,31 @@
   <!-- ============ PAY THE TAB TAB ============ -->
   <div id="tab-paytab" style="display:none;">
 
+    <!-- ONE PARLAY CAN CHANGE YOUR DAY — the marquee feature -->
+    <div class="panel" style="border:2px solid var(--mustard);background:linear-gradient(145deg,rgba(232,163,61,0.06),rgba(124,198,138,0.03));">
+      <div style="font-family:var(--display);font-size:20px;text-transform:uppercase;color:var(--mustard);letter-spacing:1px;margin-bottom:2px;">One Parlay Can Change Your Day</div>
+      <div class="panel-desc" style="margin-bottom:14px;">Tell us what you want. We build a real multi-market parlay across every prop type — HR, K's, Pitching Outs, Moneylines, Game Totals — to get you there. Quality plays only, sorted by PRIME conviction. You haven't seen this anywhere else.</div>
+
+      <div class="field-row">
+        <label>What do you want? (be specific — it matters)</label>
+        <input type="text" id="opcydGoal" placeholder="Used Hummer EV SUV · Vacation · Rent · Down payment…">
+      </div>
+      <div class="two-col">
+        <div class="field-row"><label>Total cost ($)</label><input type="number" id="opcydTotalCost" placeholder="72000" step="500"></div>
+        <div class="field-row"><label>Amount you need right now ($)</label><input type="number" id="opcydTarget" placeholder="15000" step="100"></div>
+      </div>
+      <div class="two-col">
+        <div class="field-row"><label>I'm risking ($)</label><input type="number" id="opcydRisk" placeholder="500" step="10"></div>
+        <div class="field-row" style="display:flex;flex-direction:column;justify-content:flex-end;">
+          <button class="ghost" id="opcydSuggestRisk" style="font-size:12px;padding:8px;">What should I risk?</button>
+        </div>
+      </div>
+      <div id="opcydRiskSuggestion" style="display:none;font-family:var(--mono);font-size:11px;color:#5e78a4;margin-bottom:10px;padding:8px;background:rgba(74,111,165,0.1);border-radius:6px;line-height:1.6;"></div>
+      <button class="primary" id="opcydBuildBtn" style="width:100%;font-size:15px;padding:14px;font-family:var(--display);letter-spacing:1px;text-transform:uppercase;">🎯 Build My Parlay</button>
+    </div>
+
+    <div id="opcydResult"></div>
+
     <!-- Card Stack -->
     <div class="panel">
       <div class="panel-title">My Cards <small id="ptTotalDebt"></small></div>
@@ -3350,12 +3375,19 @@ function captureLabProps(marketSlug, propType, rows){
     if(keySet.has(key)) return;
     keySet.add(key);
 
-    // Skip disabled prop types
+    // Skip disabled prop types (never actually true — we improve, not disable)
     if(isPropTypeDisabled(propType)) return;
 
+    // Apply confidence minimum — AI can raise the floor on a specific type
+    const confMin = getConfidenceMinimum(propType);
+    if(modelProb != null && modelProb < confMin) return; // below adjusted floor, skip
+
+    // Apply model probability cap — AI can limit overconfidence
+    const cappedModelProb = modelProb != null ? Math.min(modelProb, getModelProbCap(propType)) : modelProb;
+
     const tier = edge >= 0.07 ? 'strong' : edge >= 0.04 ? 'medium' : edge >= 0.01 ? 'small' : 'none';
-    // Use AI-adjusted edge threshold if available, else global default
-    const recommended = edge >= getEdgeThreshold(propType);
+    // Use AI-adjusted edge threshold if available
+    const recommended = cappedModelProb != null ? (cappedModelProb - implied) >= getEdgeThreshold(propType) : edge >= getEdgeThreshold(propType);
     const gamePk = findGamePkFromTeams(row.away_team, row.home_team);
 
     // PRIME Rating + Decision State at capture time
@@ -5469,9 +5501,19 @@ function getPrimeCap(propType){
   return state.modelAdjustments?.prime_cap?.[propType] ?? 100;
 }
 
-// Is a prop type temporarily disabled by AI adjustment?
+// Minimum model probability to capture (AI-adjusted per type)
+function getConfidenceMinimum(propType){
+  return state.modelAdjustments?.confidence_minimum?.[propType] ?? 0.01; // default: accept any
+}
+
+// Maximum model probability cap (prevents overconfidence)
+function getModelProbCap(propType){
+  return state.modelAdjustments?.model_prob_cap?.[propType] ?? 1.0; // default: no cap
+}
+
+// Was this prop type disabled? (kept for backwards compat — now always false, we never give up)
 function isPropTypeDisabled(propType){
-  return state.modelAdjustments?.prop_disabled?.[propType] === true;
+  return false; // We don't disable markets. We improve them. — "I didn't hear no bell."
 }
 
 function applyAdjustment(adj){
@@ -5483,9 +5525,14 @@ function applyAdjustment(adj){
   } else if(adj.type === 'prime_cap' && adj.propType){
     if(!current.prime_cap) current.prime_cap = {};
     current.prime_cap[adj.propType] = adj.proposedValue;
-  } else if(adj.type === 'prop_disabled' && adj.propType){
-    if(!current.prop_disabled) current.prop_disabled = {};
-    current.prop_disabled[adj.propType] = adj.proposedValue;
+  } else if(adj.type === 'confidence_minimum' && adj.propType){
+    // Raises the minimum model probability required to capture a prop type
+    if(!current.confidence_minimum) current.confidence_minimum = {};
+    current.confidence_minimum[adj.propType] = adj.proposedValue;
+  } else if(adj.type === 'model_prob_cap' && adj.propType){
+    // Caps the model probability output to prevent overconfidence
+    if(!current.model_prob_cap) current.model_prob_cap = {};
+    current.model_prob_cap[adj.propType] = adj.proposedValue;
   } else if(adj.type === 'barrel_weight'){
     current.barrel_weight = adj.proposedValue;
   } else if(adj.type === 'csw_weight'){
@@ -5574,21 +5621,26 @@ function renderActiveAdjustments(){
 
   if(adj.edge_threshold){
     Object.entries(adj.edge_threshold).forEach(([type,val])=>{
-      items.push({ label:`${type} edge threshold`, value:`${(val*100).toFixed(0)}pt minimum`, key:`edge_threshold.${type}` });
+      items.push({ label:`${type} edge threshold`, value:`${(val*100).toFixed(0)}pt minimum` });
     });
   }
   if(adj.prime_cap){
     Object.entries(adj.prime_cap).forEach(([type,val])=>{
-      items.push({ label:`${type} PRIME cap`, value:`Max ${val}`, key:`prime_cap.${type}` });
+      items.push({ label:`${type} PRIME cap`, value:`Max ${val}` });
     });
   }
-  if(adj.prop_disabled){
-    Object.entries(adj.prop_disabled).filter(([,v])=>v).forEach(([type])=>{
-      items.push({ label:`${type} props`, value:'Disabled', key:`prop_disabled.${type}` });
+  if(adj.confidence_minimum){
+    Object.entries(adj.confidence_minimum).forEach(([type,val])=>{
+      items.push({ label:`${type} confidence floor`, value:`Require ${(val*100).toFixed(0)}%+ model prob` });
     });
   }
-  if(adj.barrel_weight) items.push({ label:'Barrel rate weight', value:`${adj.barrel_weight}×`, key:'barrel_weight' });
-  if(adj.csw_weight) items.push({ label:'CSW% weight', value:`${adj.csw_weight}×`, key:'csw_weight' });
+  if(adj.model_prob_cap){
+    Object.entries(adj.model_prob_cap).forEach(([type,val])=>{
+      items.push({ label:`${type} overconfidence cap`, value:`Max ${(val*100).toFixed(0)}% model prob` });
+    });
+  }
+  if(adj.barrel_weight) items.push({ label:'Barrel rate weight', value:`${adj.barrel_weight}×` });
+  if(adj.csw_weight) items.push({ label:'CSW% weight', value:`${adj.csw_weight}×` });
 
   if(!items.length){ panel.style.display='none'; return; }
   panel.style.display='block';
@@ -5867,6 +5919,310 @@ function renderCalibrationReport(){
   `;
 }
 
+/* =========================================================================
+   ONE PARLAY CAN CHANGE YOUR DAY
+   Goal-based, multi-market parlay builder. First of its kind.
+   Pulls from HR, K's, Outs, Moneylines, Totals simultaneously.
+   ========================================================================= */
+const OPCYD_PROP_ICONS = { HR:'⚾', K:'🔥', OUTS:'⏱️', WINNER:'🏆', TOTAL:'📊' };
+
+function buildOPCYDCandidatePool(){
+  const candidates = [];
+  const seen = new Set();
+
+  // ── HR Props ──────────────────────────────────────────────────────────────
+  (state.liveOdds[PROP_MARKET.HR]||[])
+    .filter(r=>r.is_main_line && r.selection_type==='over' && r.player_name)
+    .forEach(r=>{
+      if(seen.has('HR_'+r.player_name)) return; seen.add('HR_'+r.player_name);
+      const scan = state.hrScanByName[r.player_name.toLowerCase()];
+      if(!scan || r.odds_american <= 0) return;
+      candidates.push({
+        playerName: r.player_name, propType:'HR',
+        stat:`HR Over 0.5`, matchup:`${r.away_team||'?'} @ ${r.home_team||'?'}`,
+        oddsAmerican: r.odds_american, decimal: americanToDecimal(r.odds_american),
+        impliedProb: r.odds_probability, modelProb: scan.prob,
+        edge: scan.prob - r.odds_probability, sportsbook: r.sportsbook
+      });
+    });
+
+  // ── K's Props ─────────────────────────────────────────────────────────────
+  (state.liveOdds[PROP_MARKET.K]||[])
+    .filter(r=>r.is_main_line && r.selection_type==='over' && r.player_name)
+    .forEach(r=>{
+      const k = 'K_'+r.player_name;
+      if(seen.has(k)) return; seen.add(k);
+      const scan = state.ksScanByName[r.player_name.toLowerCase()];
+      if(!scan || r.line==null || r.odds_american <= 0) return;
+      const overProb = 1 - poissonCDF(Math.floor(r.line), scan.lambda);
+      candidates.push({
+        playerName: r.player_name, propType:'K',
+        stat:`K's Over ${r.line}`, matchup:`${r.away_team||'?'} @ ${r.home_team||'?'}`,
+        oddsAmerican: r.odds_american, decimal: americanToDecimal(r.odds_american),
+        impliedProb: r.odds_probability, modelProb: overProb,
+        edge: overProb - r.odds_probability, sportsbook: r.sportsbook
+      });
+    });
+
+  // ── Pitching Outs ─────────────────────────────────────────────────────────
+  (state.liveOdds[PROP_MARKET.OUTS]||[])
+    .filter(r=>r.is_main_line && r.selection_type==='over' && r.player_name)
+    .forEach(r=>{
+      const k = 'OUTS_'+r.player_name;
+      if(seen.has(k)) return; seen.add(k);
+      const scan = state.outsScanByName[r.player_name.toLowerCase()];
+      if(!scan || r.line==null || r.odds_american <= 0) return;
+      const overProb = 1 - normalCDF(r.line, scan.projOuts, OUTS_SD);
+      candidates.push({
+        playerName: r.player_name, propType:'OUTS',
+        stat:`Outs Over ${r.line}`, matchup:`${r.away_team||'?'} @ ${r.home_team||'?'}`,
+        oddsAmerican: r.odds_american, decimal: americanToDecimal(r.odds_american),
+        impliedProb: r.odds_probability, modelProb: overProb,
+        edge: overProb - r.odds_probability, sportsbook: r.sportsbook
+      });
+    });
+
+  // ── Moneylines (underdogs and value dogs only — they build multiplier) ────
+  const mlRows = state.liveOdds.moneyline || [];
+  if(state.__winCache){
+    Object.values(state.__winCache).forEach(r=>{
+      ['away','home'].forEach(side=>{
+        const prob = side==='away'?r.awayProb:r.homeProb;
+        const abbr = side==='away'?r.awayAbbr:r.homeAbbr;
+        const name = side==='away'?r.awayName:r.homeName;
+        const k = 'ML_'+abbr;
+        if(seen.has(k)||prob<0.45) return; seen.add(k);
+        const oddsRow = findMoneylineOddsForTeam(mlRows, name);
+        if(!oddsRow || oddsRow.odds_american <= 0) return; // need positive odds for multiplier
+        candidates.push({
+          playerName: `${abbr} Moneyline`, propType:'WINNER',
+          stat:`${abbr} wins`, matchup:`${r.awayAbbr} @ ${r.homeAbbr}`,
+          oddsAmerican: oddsRow.odds_american, decimal: americanToDecimal(oddsRow.odds_american),
+          impliedProb: oddsRow.odds_probability, modelProb: prob,
+          edge: prob - oddsRow.odds_probability, sportsbook: oddsRow.sportsbook
+        });
+      });
+    });
+  }
+
+  // ── Game Totals ───────────────────────────────────────────────────────────
+  (state.ouScanResults||[]).filter(r=>r.overProb!==null && r.oddsRow && r.oddsRow.odds_american>0).forEach(r=>{
+    const dir = r.overProb>0.5?'Over':'Under';
+    const prob = r.overProb>0.5?r.overProb:1-r.overProb;
+    const k = `OU_${r.gamePk}_${dir}`;
+    if(seen.has(k)) return; seen.add(k);
+    candidates.push({
+      playerName: `${r.awayAbbr} @ ${r.homeAbbr} ${dir} ${r.line}`,
+      propType:'TOTAL',
+      stat:`Total ${dir} ${r.line}`, matchup:`${r.awayAbbr} @ ${r.homeAbbr}`,
+      oddsAmerican: r.oddsRow.odds_american, decimal: americanToDecimal(r.oddsRow.odds_american),
+      impliedProb: r.oddsRow.odds_probability, modelProb: prob,
+      edge: prob - r.oddsRow.odds_probability, sportsbook: r.oddsRow.sportsbook
+    });
+  });
+
+  // Also pull from Props Lab today's picks (richest source, all types)
+  loadLabProps().filter(p=>p.status==='pending' && p.date===state.date && p.oddsAmerican>0 && p.modelProb>=0.10).forEach(p=>{
+    const k = `LAB_${p.propType}_${p.subject}`;
+    if(seen.has(k)) return; seen.add(k);
+    candidates.push({
+      playerName: p.subject, propType: p.propType,
+      stat: p.detail, matchup: p.matchup,
+      oddsAmerican: p.oddsAmerican, decimal: americanToDecimal(p.oddsAmerican),
+      impliedProb: p.impliedProb, modelProb: p.modelProb,
+      edge: p.edge, sportsbook: p.sportsbook
+    });
+  });
+
+  // Quality score = edge × model probability (favors both quality and value)
+  candidates.forEach(c=>{
+    const edgeFactor = c.edge > 0 ? 1.5 : 1.0;
+    c.qualityScore = c.modelProb * edgeFactor * (c.decimal > 1.5 ? 1.0 : 0.7);
+  });
+
+  return candidates
+    .filter(c=>c.modelProb >= 0.10)
+    .sort((a,b)=> b.qualityScore - a.qualityScore);
+}
+
+function buildOPCYDScenario(candidates, requiredDecimal, betAmount, maxLegs){
+  const legs = [];
+  let currentDecimal = 1;
+  for(const c of candidates){
+    if(legs.length >= maxLegs || currentDecimal >= requiredDecimal) break;
+    if(legs.find(l=>l.matchup===c.matchup && l.propType===c.propType)) continue; // no duplicate game+type
+    legs.push(c);
+    currentDecimal *= c.decimal;
+  }
+  const payout = betAmount * currentDecimal;
+  const combinedProb = legs.reduce((p,c)=>p*(c.modelProb||c.impliedProb),1);
+  const parlayOdds = legs.length>0 ? decimalToAmerican(currentDecimal) : 0;
+  const marketsUsed = [...new Set(legs.map(l=>l.propType))];
+  return { legs, payout, combinedProb, parlayOdds, currentDecimal, marketsUsed };
+}
+
+function buildOPCYDParlay(){
+  const goal = document.getElementById('opcydGoal').value.trim();
+  const totalCost = parseFloat(document.getElementById('opcydTotalCost').value);
+  const target = parseFloat(document.getElementById('opcydTarget').value);
+  const risk = parseFloat(document.getElementById('opcydRisk').value);
+  const resultEl = document.getElementById('opcydResult');
+
+  if(!target||!risk||risk<=0||isNaN(target)){
+    alert('Enter how much you need and how much you want to risk.');
+    return;
+  }
+
+  const candidates = buildOPCYDCandidatePool();
+  const marketsAvailable = [...new Set(candidates.map(c=>c.propType))];
+
+  if(!candidates.length){
+    resultEl.innerHTML = `<div class="panel"><div class="no-lines-notice">⚠️ No qualified plays found. Tap <b>Load All Lines</b> in the header, then tap <b>Scan Today's Slate</b> on each tab to populate the candidate pool. Come back and we'll build your parlay.</div></div>`;
+    return;
+  }
+
+  const requiredDecimal = (target + risk) / risk;
+
+  // Three scenarios: Dream (unlimited legs), Shot (5 legs max), Single (best 1)
+  const dream = buildOPCYDScenario(candidates, requiredDecimal, risk, 12);
+  const shot = buildOPCYDScenario(candidates, requiredDecimal, risk, 4);
+  const single = buildOPCYDScenario(candidates.slice(0,1), 999, risk, 1);
+
+  renderOPCYDResult({ goal, totalCost, target, risk, requiredDecimal, dream, shot, single, marketsAvailable, allCandidates: candidates });
+}
+
+function opcydSuggestRisk(){
+  const target = parseFloat(document.getElementById('opcydTarget').value);
+  const suggEl = document.getElementById('opcydRiskSuggestion');
+  if(!target||isNaN(target)){ alert('Enter the amount you need first.'); return; }
+
+  // Build a quick estimate of what the parlay odds would look like
+  const candidates = buildOPCYDCandidatePool();
+  if(!candidates.length){
+    suggEl.style.display='block';
+    suggEl.textContent='Load lines and scan first for a tailored suggestion.';
+    return;
+  }
+  const legCount = Math.max(3, Math.min(6, Math.ceil(Math.log(target/100) / Math.log(5))));
+  const approxProb = candidates.slice(0,legCount).reduce((p,c)=>p*c.modelProb,1);
+  const expectedTries = Math.round(1/approxProb);
+  const responsible1Pct = Math.max(5, Math.round(target*0.01));
+  const responsible2Pct = Math.max(10, Math.round(target*0.02));
+
+  document.getElementById('opcydRisk').value = responsible1Pct;
+  suggEl.style.display='block';
+  suggEl.innerHTML = `At estimated odds, expect to hit roughly once every ${expectedTries} attempts.<br>
+    <b>Suggested range: $${responsible1Pct}–$${responsible2Pct} per attempt</b> (1–2% of your target).<br>
+    Auto-filled with $${responsible1Pct}. Adjust up if you want a bigger shot.`;
+}
+
+function renderOPCYDResult({ goal, totalCost, target, risk, requiredDecimal, dream, shot, single, marketsAvailable, allCandidates }){
+  const el = document.getElementById('opcydResult');
+
+  // Responsible risk analysis
+  const combinedProb = dream.combinedProb;
+  const expectedTries = combinedProb > 0 ? Math.round(1/combinedProb) : 999;
+  const recommendedPerTry = Math.max(5, Math.round(target * 0.01));
+  const expectedTotalCost = recommendedPerTry * expectedTries;
+
+  const hitsTarget = dream.payout >= target + risk;
+  const shortfall = hitsTarget ? 0 : (target + risk) - dream.payout;
+
+  const scenarioHTML = (s, label, badge, borderColor, showNote) => {
+    if(!s.legs.length) return '';
+    const hits = s.payout >= target + risk;
+    return `
+      <div style="border:1px solid ${borderColor};border-radius:10px;padding:12px;margin-bottom:10px;${badge==='RECOMMENDED'?'background:rgba(232,163,61,0.05);':''}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div>
+            <div style="font-family:var(--display);font-size:15px;text-transform:uppercase;color:var(--chalk);">${label}</div>
+            <div style="font-family:var(--mono);font-size:10px;color:${borderColor};margin-top:2px;">${s.legs.length} legs · ${s.marketsUsed.map(m=>OPCYD_PROP_ICONS[m]).join(' ')} ${s.marketsUsed.join(' + ')}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-family:var(--display);font-size:20px;text-transform:uppercase;color:${hits?'#7CC68A':'var(--mustard)'};">${fmtMoney(s.payout)}</div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);">${hits?'✓ Covers target':'Short '+fmtMoney(shortfall)}</div>
+          </div>
+        </div>
+        ${s.legs.map(l=>`<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:7px 0;border-top:1px solid var(--line);">
+          <div>
+            <div style="font-size:12px;font-weight:700;">${OPCYD_PROP_ICONS[l.propType]||'•'} <span class="type-chip">${l.propType}</span> ${l.playerName}</div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);margin-top:1px;">${l.stat} · ${l.sportsbook} · model ${pct(l.modelProb)} · edge ${l.edge>=0?'+':''}${(l.edge*100).toFixed(1)}pt</div>
+          </div>
+          <div style="font-family:var(--mono);font-weight:700;font-size:13px;color:${l.modelProb>=0.55?'#7CC68A':l.modelProb>=0.20?'var(--mustard)':'var(--chalk)'};">
+            ${l.oddsAmerican>0?'+':''}${l.oddsAmerican}
+          </div>
+        </div>`).join('')}
+        <div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--chalk-dim);">
+          <span>Parlay: <b style="color:var(--chalk);">${s.parlayOdds>0?'+':''}${s.parlayOdds}</b></span>
+          <span>Hit prob: <b style="color:var(--chalk);">${pct(s.combinedProb)}</b></span>
+          <span>Pays: <b style="color:${hits?'#7CC68A':'var(--mustard)'};">${fmtMoney(s.payout)}</b></span>
+        </div>
+      </div>`;
+  };
+
+  el.innerHTML = `
+    <!-- Goal Banner -->
+    <div class="panel" style="background:linear-gradient(135deg,rgba(232,163,61,0.12),rgba(193,80,46,0.06));border:1px solid var(--mustard);">
+      <div style="font-family:var(--display);font-size:24px;text-transform:uppercase;color:var(--mustard);">${goal||'Your Goal'}</div>
+      ${totalCost ? `<div style="font-family:var(--mono);font-size:11px;color:var(--chalk-dim);margin-top:2px;">Total cost: ${fmtMoney(totalCost)}</div>` : ''}
+      <div style="font-family:var(--mono);font-size:14px;margin-top:6px;">
+        Target: <b style="color:var(--mustard);">${fmtMoney(target)}</b> ·
+        Risking: <b style="color:var(--chalk);">${fmtMoney(risk)}</b> ·
+        Need: <b style="color:var(--chalk);">${requiredDecimal.toFixed(1)}x</b>
+      </div>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--chalk-dim);margin-top:4px;">
+        ${allCandidates.length} qualified plays across ${marketsAvailable.map(m=>`${OPCYD_PROP_ICONS[m]} ${m}`).join(' · ')}
+      </div>
+    </div>
+
+    <!-- Three Scenarios -->
+    <div class="panel">
+      <div class="panel-title">Your Parlays <small>best quality plays · all markets</small></div>
+
+      ${scenarioHTML(dream, `The Full Send · ${dream.legs.length} Legs`, 'FULL', hitsTarget?'#7CC68A':'var(--mustard)', true)}
+      ${shot.legs.length < dream.legs.length && shot.legs.length > 0 ? scenarioHTML(shot, `The Sweet Spot · ${shot.legs.length} Legs`, 'SHOT', 'var(--mustard)', false) : ''}
+      ${single.legs.length > 0 ? scenarioHTML(single, 'The Single · Best Play Only', 'SINGLE', 'var(--chalk-dim)', false) : ''}
+
+      ${!hitsTarget && shortfall > 0 ? `<div class="no-lines-notice" style="margin-top:8px;">
+        Today's best plays fall ${fmtMoney(shortfall)} short of your ${fmtMoney(target)} target at a ${fmtMoney(risk)} bet.
+        Options: increase risk to ${fmtMoney(Math.ceil(target/dream.currentDecimal+1))}, lower target, or wait for a slate with bigger odds.
+      </div>` : ''}
+    </div>
+
+    <!-- The Responsible Take -->
+    <div class="panel" style="border-left:3px solid #5e78a4;">
+      <div class="panel-title" style="color:#5e78a4;">The Responsible Take</div>
+      <div style="font-family:var(--mono);font-size:12px;color:var(--chalk-dim);line-height:1.8;">
+        The Full Send hits roughly <b style="color:var(--chalk);">once every ${expectedTries} attempts</b> (${pct(combinedProb)} per try).
+        <br>
+        <b style="color:var(--chalk);">Smart sizing: ${fmtMoney(recommendedPerTry)}–${fmtMoney(recommendedPerTry*2)} per attempt</b> (1–2% of your target).
+        <br>
+        At that sizing, expected total investment before hitting: <b style="color:var(--chalk);">${fmtMoney(expectedTotalCost)}–${fmtMoney(expectedTotalCost*2)}</b>.
+        <br><br>
+        The single best play gives you a <b style="color:#5e78a4);">${pct(single.combinedProb)}</b> shot and pays <b>${fmtMoney(single.payout)}</b> — real money with real odds.
+        <br><br>
+        <span style="color:var(--chalk);">The parlay is the shot. The single is the process. Both have a place.</span>
+      </div>
+    </div>
+  `;
+}
+
+function wireOPCYD(){
+  document.getElementById('opcydBuildBtn').addEventListener('click', buildOPCYDParlay);
+  document.getElementById('opcydSuggestRisk').addEventListener('click', opcydSuggestRisk);
+  // Auto-fill target from Pay The Tab card selector
+  document.getElementById('ptCardSelect').addEventListener('change', ()=>{
+    onPTCardSelectChange();
+    const cards = loadPTCards();
+    const id = document.getElementById('ptCardSelect').value;
+    const card = cards.find(c=>c.id===id);
+    if(card && !document.getElementById('opcydTarget').value){
+      document.getElementById('opcydTarget').value = card.balance.toFixed(2);
+      document.getElementById('opcydRisk').value = card.minPayment;
+    }
+  });
+}
+
 function wireTabs(){
   document.querySelectorAll('.tab-btn').forEach(btn=>{
     if(btn.disabled) return;
@@ -6018,6 +6374,7 @@ function init(){
 
   initPayTab();
   initModelAdjustments();
+  wireOPCYD();
 
   // AI Analyst + KV sync
   document.getElementById('aiAnalyzeBtn').addEventListener('click', runAIAnalysis);
