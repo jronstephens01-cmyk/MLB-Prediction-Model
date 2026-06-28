@@ -313,17 +313,18 @@ Return ONLY valid JSON — no markdown, no explanation, just the object:
 }
 
 Adjustment types you may use:
-- edge_threshold: min edge to recommend this propType (propType required, value 0.01-0.12)
-- prime_cap: max PRIME Rating for this propType (propType required, value 60-100)
-- prop_disabled: stop capturing this propType (propType required, value true)
-- barrel_weight: HR model Statcast multiplier (no propType, value 0.5-2.0)
-- csw_weight: K model CSW% multiplier (no propType, value 0.5-2.0)
+- edge_threshold: raise minimum edge required to recommend this propType (propType required, value 0.01-0.12). Use when a type loses across all edge sizes.
+- confidence_minimum: raise minimum model probability required to capture this propType (propType required, value 0.08-0.25). Use when model captures too many low-probability plays.
+- model_prob_cap: cap max model probability output for this propType (propType required, value 0.15-0.60). Use when model is systematically overconfident.
+- barrel_weight: adjust HR model Statcast barrel rate multiplier (no propType, value 0.5-2.0).
+- csw_weight: adjust K model CSW% multiplier (no propType, value 0.5-2.0).
+
+CRITICAL RULE: NEVER suggest stopping, disabling, or pausing a prop type. The market stays open. We improve it, not abandon it. Every adjustment must make the model BETTER — not surrender. Phrase every label as an improvement action: "Raise K confidence floor to 12%" not "Stop K's."
 
 Rules:
 - Only suggest adjustments backed by 5+ graded picks of that type
-- Confidence must be "high" (10+ picks) "medium" (5-9) or "low" (<5, then skip it)
-- Never suggest disabling a type with fewer than 5 graded picks
-- If data shows no clear signal, return empty adjustments array
+- Confidence "high" = 10+ picks, "medium" = 5-9 picks, skip anything lower
+- If no clear signal exists, return empty adjustments array
 - Maximum 3 adjustments`;
 
   const res = await fetch(CLAUDE_API, {
