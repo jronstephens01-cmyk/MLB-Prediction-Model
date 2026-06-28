@@ -1,0 +1,398 @@
+/**
+ * MLB Props Agent Worker — v4
+ * Routes:
+ *   /odds/    → SharpAPI live lines proxy (existing)
+ *   /savant/  → Baseball Savant Statcast proxy (existing)
+ *   /picks/   → KV sync endpoints (new)
+ *   /agent/   → Claude AI analyst (new)
+ *
+ * Cron: grades yesterday's picks every night at 9 AM UTC (2 AM PT)
+ *
+ * Cloudflare bindings required:
+ *   MLB_PICKS        → KV namespace (create in Workers > KV)
+ *   ODDS_API_KEY     → secret (existing SharpAPI key)
+ *   ANTHROPIC_API_KEY → secret (get from console.anthropic.com)
+ */
+
+const MLB_API     = 'https://statsapi.mlb.com/api/v1';
+const CLAUDE_API  = 'https://api.anthropic.com/v1/messages';
+const CORS        = { 'Access-Control-Allow-Origin':'*', 'Access-Control-Allow-Methods':'GET,POST,OPTIONS', 'Access-Control-Allow-Headers':'Content-Type' };
+
+const json = (data, status=200) =>
+  new Response(JSON.stringify(data), { status, headers: { 'Content-Type':'application/json', ...CORS } });
+
+function yesterday(){
+  const d = new Date();
+  d.setDate(d.getDate()-1);
+  return d.toISOString().split('T')[0];
+}
+
+function americanToDecimal(odds){
+  return odds > 0 ? 1 + odds/100 : 1 + 100/Math.abs(odds);
+}
+
+function parseInningsToOuts(ip){
+  const parts = String(ip).split('.');
+  return parseInt(parts[0])*3 + parseInt(parts[1]||0);
+}
+
+// ── Grade a single pick from a box score ────────────────────────────────────
+function gradePick(pick, boxScore){
+  if(!boxScore || pick.status !== 'pending') return null;
+
+  const findPlayer = name => {
+    let found = null;
+    ['home','away'].forEach(side=>{
+      const players = boxScore.teams?.[side]?.players;
+      if(!players) return;
+      Object.values(players).forEach(pl=>{
+        if(name && pl.person?.fullName && name.startsWith(pl.person.fullName)) found = pl;
+      });
+    });
+    return found;
+  };
+
+  let status = null;
+
+  if(pick.propType === 'HR'){
+    const pl = findPlayer(pick.subject);
+    const hr = pl?.stats?.batting?.homeRuns;
+    if(hr != null) status = hr > 0 ? 'win' : 'loss';
+  }
+  else if(pick.propType === 'K'){
+    const pl = findPlayer(pick.subject);
+    const k = pl?.stats?.pitching?.strikeOuts;
+    if(k != null && pick.line != null)
+      status = k === pick.line ? 'push' : (pick.side==='Over' ? (k>pick.line?'win':'loss') : (k<pick.line?'win':'loss'));
+  }
+  else if(pick.propType === 'OUTS'){
+    const pl = findPlayer(pick.subject);
+    const ip = pl?.stats?.pitching?.inningsPitched;
+    if(ip != null && pick.line != null){
+      const outs = parseInningsToOuts(ip);
+      status = outs===pick.line?'push':(pick.side==='Over'?(outs>pick.line?'win':'loss'):(outs<pick.line?'win':'loss'));
+    }
+  }
+  else if(pick.propType === 'WINNER'){
+    const hr = boxScore.teams?.home?.teamStats?.batting?.runs;
+    const ar = boxScore.teams?.away?.teamStats?.batting?.runs;
+    if(hr != null && ar != null && hr !== ar){
+      const winner = hr > ar ? 'Home' : 'Away';
+      status = pick.side === winner ? 'win' : 'loss';
+    }
+  }
+
+  if(!status) return null;
+  const unitProfit = pick.oddsAmerican != null
+    ? (status==='win' ? americanToDecimal(pick.oddsAmerican)-1 : status==='loss' ? -1 : 0)
+    : null;
+
+  return { status, unitProfit };
+}
+
+// ── Nightly cron: grade yesterday's picks from box scores ─────────────────
+async function gradeYesterdaysPicks(env){
+  const date = yesterday();
+  const picks = await env.MLB_PICKS.get(`picks:${date}`, 'json') || [];
+  const pending = picks.filter(p => p.status==='pending' && p.gamePk);
+  if(!pending.length){ console.log(`No pending picks for ${date}`); return; }
+  console.log(`Grading ${pending.length} pending picks for ${date}`);
+
+  const gamePks = [...new Set(pending.map(p=>p.gamePk))];
+  const boxScores = {};
+  await Promise.all(gamePks.map(async pk=>{
+    try{
+      const res = await fetch(`${MLB_API}/game/${pk}/boxscore`);
+      if(res.ok) boxScores[pk] = await res.json();
+    }catch(e){ console.error(`Box score ${pk} failed:`, e); }
+  }));
+
+  let graded = 0;
+  picks.forEach(pick=>{
+    if(pick.status!=='pending' || !pick.gamePk || !boxScores[pick.gamePk]) return;
+    const result = gradePick(pick, boxScores[pick.gamePk]);
+    if(result){
+      pick.status = result.status;
+      pick.unitProfit = result.unitProfit;
+      pick.gradedAt = new Date().toISOString();
+      graded++;
+    }
+  });
+
+  if(graded > 0){
+    await env.MLB_PICKS.put(`picks:${date}`, JSON.stringify(picks), { expirationTtl: 60*60*24*90 });
+
+    // Update cumulative performance summary
+    const perf = await env.MLB_PICKS.get('perf:summary','json') || { totalGraded:0, totalRecommended:0, wins:0, losses:0, totalUnits:0, lastUpdated:null };
+    picks.filter(p=>p.status!=='pending' && p.recommended).forEach(p=>{
+      perf.totalRecommended++;
+      if(p.status==='win'){ perf.wins++; perf.totalUnits += (p.unitProfit||0); }
+      if(p.status==='loss'){ perf.losses++; perf.totalUnits -= 1; }
+    });
+    perf.totalGraded += graded;
+    perf.lastUpdated = new Date().toISOString();
+    await env.MLB_PICKS.put('perf:summary', JSON.stringify(perf));
+    console.log(`Graded ${graded} picks for ${date}`);
+  }
+}
+
+// ── AI Analyst: reads all KV data, calls Claude ───────────────────────────
+async function handleAnalysis(env){
+  if(!env.ANTHROPIC_API_KEY)
+    return json({ error:'ANTHROPIC_API_KEY not configured as a Worker secret. See setup guide.' }, 500);
+
+  const allKeys = await env.MLB_PICKS.list({ prefix:'picks:' });
+  let allPicks = [];
+  for(const key of allKeys.keys){
+    const picks = await env.MLB_PICKS.get(key.name,'json') || [];
+    allPicks = allPicks.concat(picks);
+  }
+
+  const graded = allPicks.filter(p=>p.status==='win'||p.status==='loss');
+  const recommended = graded.filter(p=>p.recommended);
+
+  if(graded.length < 5)
+    return json({
+      analysis:`Not enough graded data yet — ${graded.length} picks graded, need at least 5. The nightly cron job grades everything automatically. Come back after a few more games.`,
+      graded: graded.length
+    });
+
+  // Build performance tables
+  const byType={}, byTier={}, calibration={};
+  graded.forEach(p=>{
+    const t=p.propType||'?';
+    if(!byType[t]) byType[t]={w:0,l:0,units:0};
+    if(p.status==='win'){ byType[t].w++; byType[t].units+=(p.unitProfit||0); }
+    if(p.status==='loss'){ byType[t].l++; byType[t].units-=1; }
+
+    const tier=p.tier||'unknown';
+    if(!byTier[tier]) byTier[tier]={w:0,l:0,units:0,rec:0};
+    if(p.status==='win') byTier[tier].w++;
+    if(p.status==='loss') byTier[tier].l++;
+    if(p.recommended){ byTier[tier].rec++; byTier[tier].units+=(p.unitProfit||(p.status==='win'?1:-1)); }
+
+    if(p.modelProb!=null){
+      const bucket = Math.floor(p.modelProb*10)*10;
+      if(!calibration[bucket]) calibration[bucket]={predicted:[],actual:[]};
+      calibration[bucket].predicted.push(p.modelProb);
+      calibration[bucket].actual.push(p.status==='win'?1:0);
+    }
+  });
+
+  const typeStr = Object.entries(byType).map(([t,s])=>
+    `${t}: ${s.w}W-${s.l}L (${((s.w/(s.w+s.l))*100).toFixed(0)}% hit rate) ${s.units>=0?'+':''}${s.units.toFixed(1)}u`
+  ).join('\n');
+
+  const tierStr = Object.entries(byTier).map(([t,s])=>
+    `${t} edge tier: ${s.w}W-${s.l}L, ${s.units>=0?'+':''}${s.units.toFixed(1)}u across ${s.rec} recommended bets`
+  ).join('\n');
+
+  const calStr = Object.entries(calibration).sort(([a],[b])=>a-b).map(([bucket,data])=>{
+    const avgPred = data.predicted.reduce((a,b)=>a+b,0)/data.predicted.length;
+    const actual = data.actual.reduce((a,b)=>a+b,0)/data.actual.length;
+    return `${bucket}-${parseInt(bucket)+10}% predicted → ${(actual*100).toFixed(0)}% actual (n=${data.predicted.length})`;
+  }).join('; ');
+
+  const recWins = recommended.filter(p=>p.status==='win').length;
+  const totalUnits = recommended.reduce((s,p)=>s+(p.unitProfit||(p.status==='win'?1:-1)),0);
+  const roi = recommended.length ? (totalUnits/recommended.length*100) : 0;
+
+  const prompt = `You are an MLB sports betting model analyst. The user is building a quantitative props model to beat sportsbook pricing over time. Analyze their data and give direct, actionable feedback.
+
+OVERALL PERFORMANCE (${graded.length} graded picks):
+Recommended bets (edge >3%): ${recommended.length} picks, ${recWins}W-${recommended.length-recWins}L
+Units profit/loss: ${totalUnits>=0?'+':''}${totalUnits.toFixed(2)} units
+ROI: ${roi>=0?'+':''}${roi.toFixed(1)}%
+
+BY PROP TYPE:
+${typeStr||'no data yet'}
+
+BY EDGE TIER:
+${tierStr||'no data yet'}
+
+MODEL CALIBRATION (predicted probability vs actual hit rate):
+${calStr||'insufficient data'}
+
+Answer these 5 questions concisely and directly:
+1. SIGNAL vs NOISE: Is there genuine edge here given the sample size of ${graded.length} picks, or is this too small to conclude? What sample size is needed to be confident?
+2. BEST BET: Which prop type and edge tier combination is showing the clearest profitability signal? Where should bets be concentrated?
+3. CALIBRATION: Is the model over-estimating or under-estimating probability? What does the calibration data tell you about model accuracy?
+4. TOMORROW'S FOCUS: Given this data, what should the user bet on and what should they avoid in tomorrow's slate?
+5. ONE IMPROVEMENT: What single model change would most improve ROI based on this performance data?
+
+Be direct and numbers-first. Call out what's working and what isn't. If the sample is too small to conclude anything meaningful, say so clearly.`;
+
+  const claudeRes = await fetch(CLAUDE_API, {
+    method:'POST',
+    headers: { 'Content-Type':'application/json', 'x-api-key':env.ANTHROPIC_API_KEY, 'anthropic-version':'2023-06-01' },
+    body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1200, messages:[{role:'user',content:prompt}] })
+  });
+
+  const claudeData = await claudeRes.json();
+  const analysis = claudeData.content?.[0]?.text || 'Analysis call failed — check ANTHROPIC_API_KEY secret.';
+
+  return json({ analysis, meta:{
+    graded:graded.length, recommended:recommended.length,
+    roi:roi.toFixed(1), units:totalUnits.toFixed(2)
+  }, byType, byTier, calibration, gradedCount:graded.length });
+}
+
+// ── KV picks sync routes ──────────────────────────────────────────────────
+async function handlePicksRoute(url, request, env){
+  const path = url.pathname.replace('/picks','');
+
+  // GET /picks/sync?since=YYYY-MM-DD
+  if(path==='/sync' && request.method==='GET'){
+    const since = url.searchParams.get('since') || (() => {
+      const d=new Date(); d.setDate(d.getDate()-30); return d.toISOString().split('T')[0];
+    })();
+    const allKeys = await env.MLB_PICKS.list({ prefix:'picks:' });
+    const results = {};
+    for(const key of allKeys.keys){
+      const date = key.name.replace('picks:','');
+      if(date >= since) results[date] = await env.MLB_PICKS.get(key.name,'json') || [];
+    }
+    return json(results);
+  }
+
+  // POST /picks/save
+  if(path==='/save' && request.method==='POST'){
+    const {date, picks} = await request.json();
+    if(!date||!picks) return json({error:'date and picks required'},400);
+    await env.MLB_PICKS.put(`picks:${date}`, JSON.stringify(picks), { expirationTtl:60*60*24*90 });
+    return json({ok:true, saved:picks.length});
+  }
+
+  // GET /picks/stats
+  if(path==='/stats'){
+    const stats = await env.MLB_PICKS.get('perf:summary','json') || { totalGraded:0, totalRecommended:0, wins:0, losses:0, totalUnits:0, lastUpdated:null };
+    return json(stats);
+  }
+
+  return json({error:'Not found'},404);
+}
+
+// ── Main export ────────────────────────────────────────────────────────────
+// ── Structured adjustment suggestions ────────────────────────────────────
+async function handleAdjustmentSuggestions(request, env){
+  if(!env.ANTHROPIC_API_KEY) return json({ adjustments:[] });
+
+  const body = await request.json().catch(()=>({}));
+  const { byType={}, byTier={}, calibration={}, graded=0 } = body;
+
+  if(graded < 5) return json({ adjustments:[], reason:'Insufficient data' });
+
+  const dataStr = Object.entries(byType).map(([t,s])=>
+    `${t}: ${s.w}W-${s.l}L (${s.w+s.l} graded, ${((s.w/(s.w+s.l||1))*100).toFixed(0)}% hit rate, ${s.units>=0?'+':''}${s.units.toFixed(1)}u)`
+  ).join('\n');
+
+  const prompt = `You are a sports betting model optimizer. Based on performance data, propose 1-3 specific model parameter adjustments.
+
+PERFORMANCE BY PROP TYPE:
+${dataStr || 'No data yet'}
+
+BY EDGE TIER:
+${Object.entries(byTier).map(([t,s])=>`${t}: ${s.w}W-${s.l}L ${s.units>=0?'+':''}${s.units.toFixed(1)}u`).join('\n')}
+
+Return ONLY valid JSON — no markdown, no explanation, just the object:
+{
+  "adjustments": [
+    {
+      "id": "adj_001",
+      "type": "edge_threshold",
+      "propType": "K",
+      "label": "Raise K edge threshold to 5pt",
+      "description": "One sentence: what to change and why, citing specific numbers",
+      "currentValue": 0.03,
+      "proposedValue": 0.05,
+      "unit": "decimal_edge",
+      "confidence": "high",
+      "evidence": "The specific hit rate data supporting this"
+    }
+  ]
+}
+
+Adjustment types you may use:
+- edge_threshold: min edge to recommend this propType (propType required, value 0.01-0.12)
+- prime_cap: max PRIME Rating for this propType (propType required, value 60-100)
+- prop_disabled: stop capturing this propType (propType required, value true)
+- barrel_weight: HR model Statcast multiplier (no propType, value 0.5-2.0)
+- csw_weight: K model CSW% multiplier (no propType, value 0.5-2.0)
+
+Rules:
+- Only suggest adjustments backed by 5+ graded picks of that type
+- Confidence must be "high" (10+ picks) "medium" (5-9) or "low" (<5, then skip it)
+- Never suggest disabling a type with fewer than 5 graded picks
+- If data shows no clear signal, return empty adjustments array
+- Maximum 3 adjustments`;
+
+  const res = await fetch(CLAUDE_API, {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01'},
+    body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:600,
+      messages:[{role:'user', content:prompt}] })
+  });
+  const data = await res.json();
+  const text = (data.content?.[0]?.text||'{"adjustments":[]}').replace(/```json|```/g,'').trim();
+  try{ return json(JSON.parse(text)); }
+  catch(e){ return json({ adjustments:[] }); }
+}
+
+export default {
+  async fetch(request, env, ctx){
+    const url = new URL(request.url);
+
+    if(request.method==='OPTIONS') return new Response(null, {headers:CORS});
+
+    // SharpAPI odds proxy (existing)
+    if(url.pathname.startsWith('/odds/')){
+      const upstreamPath = url.pathname.replace('/odds','');
+      const upstreamUrl = new URL(`https://api.sharpapi.io${upstreamPath}`);
+      url.searchParams.forEach((v,k)=>upstreamUrl.searchParams.set(k,v));
+      const res = await fetch(upstreamUrl.toString(), { headers:{'X-API-Key':env.ODDS_API_KEY} });
+      return new Response(await res.text(), { status:res.status, headers:{'Content-Type':'application/json',...CORS} });
+    }
+
+    // Baseball Savant Statcast proxy (existing)
+    if(url.pathname.startsWith('/savant/')){
+      const upstreamPath = url.pathname.replace('/savant','');
+      const upstreamUrl = new URL(`https://baseballsavant.mlb.com${upstreamPath}`);
+      url.searchParams.forEach((v,k)=>upstreamUrl.searchParams.set(k,v));
+      const res = await fetch(upstreamUrl.toString(), { headers:{'User-Agent':'Mozilla/5.0','Accept':'text/csv,text/plain,*/*'} });
+      return new Response(await res.text(), { status:res.status, headers:{'Content-Type':'text/plain',...CORS} });
+    }
+
+    // Health check — used by dashboard to verify deployment
+    if(url.pathname === '/health'){
+      let kvOk = false, anthropicOk = false;
+      try{ await env.MLB_PICKS.get('__health_test__'); kvOk = true; }catch(e){}
+      anthropicOk = !!(env.ANTHROPIC_API_KEY);
+      return json({
+        version: 'v4',
+        kv: kvOk,
+        anthropic: anthropicOk,
+        cron: '0 9 * * *',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // KV picks sync (new)
+    if(url.pathname.startsWith('/picks/')){
+      return handlePicksRoute(url, request, env);
+    }
+
+    // AI analyst (new)
+    if(url.pathname==='/agent/analyze'){
+      const mode = url.searchParams.get('mode');
+      if(mode === 'adjustments') return handleAdjustmentSuggestions(request, env);
+      return handleAnalysis(env);
+    }
+
+    return new Response('MLB Props Agent — v4 | /odds/ /savant/ /picks/ /agent/', { headers:CORS });
+  },
+
+  // Cron: runs every night at 9 AM UTC (2 AM PT)
+  async scheduled(event, env, ctx){
+    ctx.waitUntil(gradeYesterdaysPicks(env));
+  }
+};
