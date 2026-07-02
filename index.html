@@ -579,6 +579,17 @@
       <div id="winLeaderboard" style="margin-top:6px;"></div>
     </div>
 
+    <!-- PITCHER TO RECORD A WIN -->
+    <div class="panel">
+      <div class="panel-title">⚾ Pitcher to Record a Win</div>
+      <div class="panel-desc">P(Win) = P(team wins) × P(pitches 5+ innings) × lead-retention factor. A starter needs all three to cash — books price on name recognition, we price the joint probability. Requires slate scan above (uses the win model + outs projections + bullpen fatigue).</div>
+      <button class="ghost" id="pwinLoadOddsBtn" style="width:100%; margin-bottom:8px;">Load Live "Record a Win" Lines</button>
+      <div class="odds-status" id="pwinOddsStatus"></div>
+      <button class="primary" id="pwinScanBtn" style="width:100%;">Scan Pitcher Win Probabilities</button>
+      <div class="progress-text" id="pwinScanProgress"></div>
+      <div id="pwinLeaderboard" style="margin-top:6px;"><div class="empty-state">Scan the slate first, then run this.</div></div>
+    </div>
+
     <div class="panel">
       <div class="panel-title">Game Winner <small>fine-tune a single pick</small></div>
       <div class="panel-desc">Win probability from season win% (log5 method), adjusted for each starting pitcher's ERA relative to league average, plus a standard home-field edge.</div>
@@ -1107,7 +1118,7 @@ const SAVANT_PROXY  = 'https://mlb-odds-proxy.jronstephens01.workers.dev/savant'
 const API = "https://statsapi.mlb.com/api/v1";
 const WEATHER_API = "https://api.open-meteo.com/v1/forecast";
 const ODDS_PROXY = "https://mlb-odds-proxy.jronstephens01.workers.dev/odds/api/v1";
-const PROP_MARKET = { HR:'player_home_runs', K:'player_strikeouts', OUTS:'player_pitching_outs' };
+const PROP_MARKET = { HR:'player_home_runs', K:'player_strikeouts', OUTS:'player_pitching_outs', PWIN:'player_record_a_win' };
 const TOTAL_MARKET = 'totals';
 const NRFI_MARKET  = 'nrfi';  // SharpAPI market slug for NRFI/YRFI
 const EDGE_TAKE_THRESHOLD = 0.03;
@@ -1145,6 +1156,7 @@ let state = {
   teamOffenseCache: {},
   ouScanResults: [],
   nrfiScanResults: [],
+  pwinScanResults: [],
   streakPicks: [],
   streakFilter: 'all'
 };
@@ -2260,6 +2272,7 @@ async function runAutoScan(){
   })));
 
   // Update scan progress with PRIME play count
+  const pctWithStatcast = allResults.length ? Math.round(allResults.filter(r=>getStatcastForBatter(r.id)).length/allResults.length*100) : 0;
   const primeNote = primeHRPlays.length > 0 ? ` · ${primeHRPlays.length} PRIME plays (2+ signals)` : '';
   progressEl.textContent = `Done — ${allResults.length} batters scanned · ${pctWithStatcast}% Statcast${primeNote}. Full board below. Recommended = 2+ signals + edge.`;
 
@@ -2268,8 +2281,6 @@ async function runAutoScan(){
   if(hrLines.length) captureLabProps(PROP_MARKET.HR, 'HR', hrLines);
 
   renderHRPropsBoard();
-
-  const pctWithStatcast = allResults.length ? Math.round(allResults.filter(r=>getStatcastForBatter(r.id)).length/allResults.length*100) : 0;
   scanBtn.disabled = false;
 }
 
@@ -2411,6 +2422,7 @@ async function runKsCalculation(){
     oppK = oppKRate;
     bf = pitStats.blendedBFperStart || (pitStats.blendedIPperStart ? pitStats.blendedIPperStart*4.2 : 21);
     recentNote = pitStats.recentForm;
+    state.lastKsGamePitcherId = parseInt(pitcherId); // for CSW% lookup below
   }
 
   const pitRel = pitcherK / LEAGUE_AVG_K_PCT;
@@ -5699,6 +5711,7 @@ function renderProposedAdjustments(adjustments){
     decimal_edge: v => `${(v*100).toFixed(0)}pt minimum`,
     prime_score: v => `PRIME cap ${v}`,
     multiplier: v => `${v}× weight`,
+    probability: v => `${(v*100).toFixed(0)}%`,
     boolean: v => v ? 'Disabled' : 'Enabled'
   };
 
@@ -6152,6 +6165,20 @@ function buildOPCYDCandidatePool(){
     });
   });
 
+  // ── Pitcher to Record a Win (positive odds only — they build multiplier) ──
+  (state.pwinScanResults||[]).forEach(r=>{
+    if(!r.oddsRow || r.oddsRow.odds_american <= 0 || r.pWin < 0.30) return;
+    const k = 'PWIN_'+r.name;
+    if(seen.has(k)) return; seen.add(k);
+    candidates.push({
+      playerName: r.name, propType:'WINNER',
+      stat:'To Record a Win', matchup:`${r.team} vs ${r.opp}`,
+      oddsAmerican: r.oddsRow.odds_american, decimal: americanToDecimal(r.oddsRow.odds_american),
+      impliedProb: r.oddsRow.odds_probability, modelProb: r.pWin,
+      edge: r.pWin - r.oddsRow.odds_probability, sportsbook: r.oddsRow.sportsbook
+    });
+  });
+
   // Also pull from Props Lab today's picks (richest source, all types)
   loadLabProps().filter(p=>p.status==='pending' && p.date===state.date && p.oddsAmerican>0 && p.modelProb>=0.10).forEach(p=>{
     const k = `LAB_${p.propType}_${p.subject}`;
@@ -6330,7 +6357,7 @@ function renderOPCYDResult({ goal, totalCost, target, risk, requiredDecimal, dre
         <br>
         At that sizing, expected total investment before hitting: <b style="color:var(--chalk);">${fmtMoney(expectedTotalCost)}–${fmtMoney(expectedTotalCost*2)}</b>.
         <br><br>
-        The single best play gives you a <b style="color:#5e78a4);">${pct(single.combinedProb)}</b> shot and pays <b>${fmtMoney(single.payout)}</b> — real money with real odds.
+        The single best play gives you a <b style="color:#5e78a4;">${pct(single.combinedProb)}</b> shot and pays <b>${fmtMoney(single.payout)}</b> — real money with real odds.
         <br><br>
         <span style="color:var(--chalk);">The parlay is the shot. The single is the process. Both have a place.</span>
       </div>
@@ -6418,13 +6445,23 @@ async function calcNRFIGame(g){
   const nrfiProb = (1-awayScoreProb) * (1-homeScoreProb);
   const yrfiProb = 1 - nrfiProb;
 
-  // Compare to live NRFI odds
+  // Compare to live NRFI odds — match on FULL team names (SharpAPI uses full names, not abbrs)
+  const awayFullName = (away.name||'').toLowerCase();
+  const homeFullName = (home.name||'').toLowerCase();
   const nrfiRows = state.liveOdds[NRFI_MARKET] || [];
-  const nrfiRow = nrfiRows.find(r=>
-    (r.away_team && r.away_team.toLowerCase().includes(awayAbbr.toLowerCase())) ||
-    (r.home_team && r.home_team.toLowerCase().includes(homeAbbr.toLowerCase()))
-  );
-  const nrfiImplied = nrfiRow ? (nrfiRow.selection_type==='nrfi' ? nrfiRow.odds_probability : 1-nrfiRow.odds_probability) : null;
+  const gameRows = nrfiRows.filter(r=>{
+    const ra = (r.away_team||'').toLowerCase(), rh = (r.home_team||'').toLowerCase();
+    return (ra && awayFullName && (ra===awayFullName || ra.includes(awayFullName) || awayFullName.includes(ra)))
+        || (rh && homeFullName && (rh===homeFullName || rh.includes(homeFullName) || homeFullName.includes(rh)));
+  });
+  // Prefer explicit NRFI selection; fall back to YRFI and invert
+  const nrfiSel = gameRows.find(r=>/no.?run|nrfi/i.test(r.selection_type||r.selection||''));
+  const yrfiSel = gameRows.find(r=>/yes|score|yrfi/i.test(r.selection_type||r.selection||''));
+  const nrfiRow = nrfiSel || yrfiSel || gameRows[0] || null;
+  let nrfiImplied = null;
+  if(nrfiSel) nrfiImplied = nrfiSel.odds_probability;
+  else if(yrfiSel) nrfiImplied = 1 - yrfiSel.odds_probability;
+  else if(nrfiRow) nrfiImplied = nrfiRow.odds_probability; // best guess
   const nrfiEdge = nrfiImplied !== null ? nrfiProb - nrfiImplied : null;
   const yrfiEdge = nrfiImplied !== null ? yrfiProb - (1-nrfiImplied) : null;
 
@@ -6534,6 +6571,107 @@ function nrfiRowHTML(r, side){
         <div style="font-family:var(--mono);font-size:10px;color:${color};">${side}</div>
       </div>
     </div>`;
+}
+
+/* =========================================================================
+   PITCHER TO RECORD A WIN
+   Joint probability: team wins × 5+ IP × bullpen holds the lead.
+   Books anchor to name recognition. We price the actual three-way parlay
+   hidden inside this single prop.
+   ========================================================================= */
+// Given team wins AND starter went 5+, starter historically gets the W ~73%
+const PWIN_LEAD_RETENTION = 0.73;
+
+async function runPWinScan(){
+  const btn = document.getElementById('pwinScanBtn');
+  const progressEl = document.getElementById('pwinScanProgress');
+  const boardEl = document.getElementById('pwinLeaderboard');
+
+  if(!state.__winCache || !Object.keys(state.__winCache).length){
+    alert("Run the Winners slate scan above first — the win model feeds this.");
+    return;
+  }
+  btn.disabled = true;
+  progressEl.textContent = 'Calculating joint win probabilities…';
+
+  const results = [];
+  for(const g of state.games){
+    const winRow = state.__winCache[g.gamePk];
+    if(!winRow) continue;
+    const opts = getProbablePitcherOptions(g);
+    for(const o of opts){
+      // 1. P(team wins) from the moneyline model
+      const isAway = o.team === winRow.awayAbbr;
+      const teamWinProb = isAway ? winRow.awayProb : winRow.homeProb;
+      if(teamWinProb == null) continue;
+
+      // 2. P(5+ IP) = P(15+ outs) from the outs projection
+      const outsScan = state.outsScanByName[o.name.toLowerCase()];
+      let p5ip;
+      if(outsScan?.projOuts != null){
+        p5ip = 1 - normalCDF(14.5, outsScan.projOuts, OUTS_SD);
+      } else {
+        const pitStats = await getPitcherStats(o.id);
+        if(!pitStats?.blendedIPperStart){ continue; }
+        p5ip = 1 - normalCDF(14.5, pitStats.blendedIPperStart*3, OUTS_SD);
+      }
+
+      // 3. Lead retention, adjusted by HIS OWN bullpen quality
+      // Fatigued pen = more blown leads = lower retention
+      const bf = getBullpenFatigue(o.teamId);
+      const retention = bf.level === 'Fatigued' ? PWIN_LEAD_RETENTION - 0.05
+                      : bf.level === 'Fresh'    ? PWIN_LEAD_RETENTION + 0.03
+                      : PWIN_LEAD_RETENTION;
+
+      const pWin = teamWinProb * p5ip * retention;
+
+      // Compare to live line
+      const rows = state.liveOdds[PROP_MARKET.PWIN] || [];
+      const oddsRow = rows.find(r=>{
+        const n = (r.player_name || r.selection || '').toLowerCase();
+        return n === o.name.toLowerCase() ||
+               (n && o.name.toLowerCase().includes(n.split(' ').pop()));
+      }) || null;
+      const edge = oddsRow ? pWin - oddsRow.odds_probability : null;
+
+      results.push({
+        name:o.name, team:o.team, opp:o.oppAbbr, gamePk:g.gamePk,
+        teamWinProb, p5ip, retention, pWin, oddsRow, edge, bpLevel: bf.level
+      });
+    }
+  }
+
+  results.sort((a,b)=> (b.edge ?? b.pWin-1) - (a.edge ?? a.pWin-1));
+  state.pwinScanResults = results;
+  renderPWinBoard(results);
+  progressEl.textContent = `Done — ${results.length} starters projected.`;
+  btn.disabled = false;
+}
+
+function renderPWinBoard(results){
+  const boardEl = document.getElementById('pwinLeaderboard');
+  if(!results.length){ boardEl.innerHTML = '<div class="empty-state">No projections available.</div>'; return; }
+  const hasLines = (state.liveOdds[PROP_MARKET.PWIN]||[]).length > 0;
+
+  boardEl.innerHTML = results.map((r,i)=>{
+    const color = r.pWin >= 0.45 ? '#7CC68A' : r.pWin >= 0.35 ? 'var(--mustard)' : 'var(--chalk-dim)';
+    const edgeBadge = r.edge !== null
+      ? `<div class="lb-edge-badge ${r.edge>=0.04?'lb-edge-take':r.edge>=0?'lb-edge-close':'lb-edge-pass'}">${r.edge>=0?'+':''}${(r.edge*100).toFixed(1)}pt</div>`
+      : (hasLines ? '<div class="lb-edge-unknown">no line</div>' : '');
+    const penNote = r.bpLevel !== 'Normal' ? ` · pen ${r.bpLevel}` : '';
+    return `<div class="leaderboard-row${hasLines&&r.edge!==null&&r.edge<0?' lb-dimmed':''}">
+      <div class="rank">${i+1}</div>
+      <div class="lb-main">
+        <div class="lb-name">${r.name} <span style="color:var(--chalk-dim);font-weight:400;">(${r.team})</span></div>
+        <div class="lb-meta">vs ${r.opp}${r.oddsRow?` · ${r.oddsRow.sportsbook} ${r.oddsRow.odds_american>0?'+':''}${r.oddsRow.odds_american}`:''}</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--chalk-dim);margin-top:2px;">team win ${pct(r.teamWinProb)} × 5+IP ${pct(r.p5ip)} × hold ${pct(r.retention)}${penNote}</div>
+      </div>
+      <div class="lb-right">
+        <div class="lb-score" style="color:${color};">${pct(r.pWin)}</div>
+        ${edgeBadge}
+      </div>
+    </div>`;
+  }).join('') + `<div class="panel-desc" style="margin-top:8px;">The breakdown line shows why: even a 65% team favorite with a 5-inning starter is only ~${pct(0.65*0.75*0.73)} to record the W. Books price these at -140 (58% implied) constantly. That's the edge.</div>`;
 }
 
 function wireTabs(){
@@ -6679,6 +6817,9 @@ function init(){
   document.getElementById('nrfiLoadOddsBtn').addEventListener('click', ()=> loadLiveOdds(NRFI_MARKET, 'nrfiOddsStatus').then(()=>{ if(state.nrfiScanResults.length) renderNRFIBoard(state.nrfiScanResults); }));
   document.getElementById('nrfiScanBtn').addEventListener('click', runNRFIScan);
   document.getElementById('nrfiEdgeGate').addEventListener('change', ()=> renderNRFIBoard(state.nrfiScanResults));
+
+  document.getElementById('pwinLoadOddsBtn').addEventListener('click', ()=> loadLiveOdds(PROP_MARKET.PWIN, 'pwinOddsStatus').then(()=>{ if(state.pwinScanResults?.length) renderPWinBoard(state.pwinScanResults); }));
+  document.getElementById('pwinScanBtn').addEventListener('click', runPWinScan);
 
   // Streak tab
   document.getElementById('streakAutoBuildBtn').addEventListener('click', ()=>{
